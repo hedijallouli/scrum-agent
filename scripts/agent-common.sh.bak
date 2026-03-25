@@ -1,0 +1,1250 @@
+#!/usr/bin/env bash
+# =============================================================================
+# agent-common.sh — Shared utilities for BisB AI agent pipeline
+# =============================================================================
+set -euo pipefail
+
+# Ensure tools are in PATH (bun, claude, gh may be in user-local dirs)
+export PATH="$HOME/.bun/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+
+# Load environment
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="/opt/bisb/.env.agents"
+
+load_env() {
+  if [[ -f "$ENV_FILE" ]]; then
+    set -a
+    source "$ENV_FILE"
+    set +a
+  else
+    log_error "Missing $ENV_FILE"
+    exit 1
+  fi
+}
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
+LOG_DIR="${SCRIPT_DIR}/../logs"
+mkdir -p "$LOG_DIR"
+
+log_info() {
+  local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] $*"
+  echo "$msg" >&2
+  echo "$msg" >> "${LOG_FILE:-/dev/null}"
+}
+
+log_error() {
+  local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $*"
+  echo "$msg" >&2
+  echo "$msg" >> "${LOG_FILE:-/dev/null}"
+}
+
+log_success() {
+  local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [SUCCESS] $*"
+  echo "$msg" >&2
+  echo "$msg" >> "${LOG_FILE:-/dev/null}"
+}
+
+init_log() {
+  local ticket="$1" agent="$2"
+  LOG_FILE="${LOG_DIR}/${ticket}-${agent}-$(date '+%Y-%m-%dT%H:%M:%S').log"
+  log_info "Starting agent=${agent} ticket=${ticket}"
+}
+
+# ─── Lock Management (per-agent) ─────────────────────────────────────────────
+# Each agent sets AGENT_NAME before sourcing this file for per-agent locks.
+# This allows Salma, Youssef, Nadia, and Karim to run in parallel.
+LOCK_FILE="/tmp/bisb-agent-${AGENT_NAME:-global}.lock"
+LOCK_MAX_AGE=1800  # 30 minutes
+
+acquire_lock() {
+  if [[ -f "$LOCK_FILE" ]]; then
+    local age=$(( $(date +%s) - $(stat -c %Y "$LOCK_FILE" 2>/dev/null || stat -f %m "$LOCK_FILE" 2>/dev/null || echo 0) ))
+    if (( age > LOCK_MAX_AGE )); then
+      log_info "Removing stale lock (age=${age}s)"
+      rm -f "$LOCK_FILE"
+    else
+      log_info "Another ${AGENT_NAME:-agent} is running (lock age=${age}s). Skipping."
+      return 1
+    fi
+  fi
+  echo "$$" > "$LOCK_FILE"
+  trap 'rm -f "$LOCK_FILE"' EXIT
+  return 0
+}
+
+release_lock() {
+  rm -f "$LOCK_FILE"
+}
+
+# ─── Jira Label Helpers ─────────────────────────────────────────────────────
+jira_remove_label() {
+  local key="$1" label="$2"
+  curl -s -X PUT \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/issue/${key}" \
+    -d "{
+      \"update\": {
+        \"labels\": [{\"remove\": \"${label}\"}]
+      }
+    }" > /dev/null 2>&1
+}
+
+# ─── Jira API ─────────────────────────────────────────────────────────────────
+
+
+jira_auth() {
+  # -w0 prevents line wrapping on Linux (macOS base64 doesn't wrap by default)
+  echo -n "${JIRA_EMAIL}:${JIRA_API_TOKEN}" | base64 -w0 2>/dev/null || echo -n "${JIRA_EMAIL}:${JIRA_API_TOKEN}" | base64
+}
+
+jira_get_ticket() {
+  local key="$1"
+  curl -s -X GET \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/issue/${key}?fields=summary,description,labels,status,priority,issuetype,comment,subtasks"
+}
+
+jira_get_ticket_field() {
+  local key="$1" field="$2"
+  jira_get_ticket "$key" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+fields = data.get('fields', {})
+val = fields.get('$field', '')
+if isinstance(val, dict):
+    print(val.get('name', val.get('content', json.dumps(val))))
+elif isinstance(val, list):
+    print(json.dumps(val))
+else:
+    print(val or '')
+" 2>/dev/null
+}
+
+jira_get_description_text() {
+  local key="$1"
+  jira_get_ticket "$key" | python3 -c "
+import sys, json
+def extract_text(node):
+    if isinstance(node, str): return node
+    if isinstance(node, dict):
+        if node.get('type') == 'text': return node.get('text', '')
+        content = node.get('content', [])
+        return ''.join(extract_text(c) for c in content)
+    if isinstance(node, list):
+        return ''.join(extract_text(c) for c in node)
+    return ''
+data = json.load(sys.stdin)
+desc = data.get('fields', {}).get('description', {})
+print(extract_text(desc))
+" 2>/dev/null
+}
+
+jira_get_comments() {
+  local key="$1"
+  jira_get_ticket "$key" | python3 -c "
+import sys, json
+def extract_text(node):
+    if isinstance(node, str): return node
+    if isinstance(node, dict):
+        if node.get('type') == 'text': return node.get('text', '')
+        return ''.join(extract_text(c) for c in node.get('content', []))
+    if isinstance(node, list): return ''.join(extract_text(c) for c in node)
+    return ''
+data = json.load(sys.stdin)
+comments = data.get('fields', {}).get('comment', {}).get('comments', [])
+for c in comments[-5:]:  # last 5 comments
+    author = c.get('author', {}).get('displayName', 'Unknown')
+    body = extract_text(c.get('body', {}))
+    print(f'--- {author} ---')
+    print(body)
+    print()
+" 2>/dev/null
+}
+
+jira_add_comment() {
+  local key="$1" message="$2"
+  curl -s -X POST \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/issue/${key}/comment" \
+    -d "{
+      \"body\": {
+        \"type\": \"doc\",
+        \"version\": 1,
+        \"content\": [{
+          \"type\": \"paragraph\",
+          \"content\": [{\"type\": \"text\", \"text\": $(echo "$message" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))')}]
+        }]
+      }
+    }" > /dev/null 2>&1
+}
+
+# ─── Rich ADF Comment ──────────────────────────────────────────────────────
+# Posts a richly formatted Jira comment with agent identity, colored panel,
+# clickable links, bullet lists, and status indicators.
+#
+# Usage: jira_add_rich_comment <ticket_key> <agent> <verdict> <message>
+#   verdict: PASS|FAIL|PASS_WITH_WARNINGS|BLOCKED|ESCALATED|MERGED|INFO|PENDING|WARNING|NONE
+#   message: Structured text (## Heading, - bullets, PR: url, plain text)
+
+declare -A AGENT_FAMILY_INITIAL=(
+  [salma]="B.A."
+  [youssef]="T."
+  [nadia]="C."
+  [karim]="B."
+  [omar]="J."
+  [layla]="M."
+  [rami]="H."
+)
+declare -A AGENT_PANEL_TYPE=(
+  [salma]="info"
+  [youssef]="success"
+  [nadia]="error"
+  [karim]="warning"
+  [omar]="note"
+  [layla]="note"
+  [rami]="info"
+)
+# Jira custom emoji (site emoji) — uploaded via admin.atlassian.com/emoji
+# Format: shortName|mediaId  (pipe-separated)
+declare -A AGENT_JIRA_EMOJI=(
+  [salma]=":salma:|5813797c-0309-472e-8826-69cdcadfde5f"
+  [youssef]=":youssef:|a52b12cd-b69c-464a-94d7-af5faa5fa72e"
+  [nadia]=":nadia:|74eacba0-6ceb-4bfe-b8dc-4ceea0fcd3c2"
+  [karim]=":karim:|767d86b3-3e24-488a-96ad-a85c1155598b"
+  [omar]=":omar:|1e8ddd0d-db70-4437-aa98-3343df73588e"
+  [layla]=":layla:|2cf1ca02-731c-45df-8cde-09e85dcdf914"
+  [rami]=":rami:|223b1bd4-9938-4b57-882a-3463f77650af"
+)
+
+jira_add_rich_comment() {
+  local key="$1" agent="$2" verdict="$3" message="$4"
+
+  # Strip ticket suffix from agent name (e.g., nadia-SCRUM-17 → nadia)
+  local agent_base="${agent%%-SCRUM*}"
+
+  # Resolve agent identity
+  local full_name="${AGENT_SLACK_USERNAME[$agent_base]:-$agent}"
+  local first_name="${full_name%% *}"
+  local initial="${AGENT_FAMILY_INITIAL[$agent_base]:-}"
+  local display_name="${first_name} ${initial}"
+  local job_title="${AGENT_JOB_TITLE[$agent_base]:-}"
+  local panel_type="${AGENT_PANEL_TYPE[$agent_base]:-note}"
+
+  # Use Jira custom emoji (with media ID) if available, fallback to standard emoji
+  local jira_emoji="${AGENT_JIRA_EMOJI[$agent_base]:-}"
+  local emoji_shortname emoji_id
+  if [[ -n "$jira_emoji" ]]; then
+    emoji_shortname="${jira_emoji%%|*}"
+    emoji_id="${jira_emoji##*|}"
+  else
+    emoji_shortname="${AGENT_SLACK_EMOJI[$agent_base]:-:robot_face:}"
+    emoji_id=""
+  fi
+
+  # Build ADF via Python script
+  local adf_json
+  adf_json=$(echo "$message" | python3 "${SCRIPT_DIR}/build-adf-comment.py" \
+    "$display_name" "$job_title" "$panel_type" "$verdict" "$emoji_shortname" "$emoji_id" 2>/dev/null)
+
+  if [[ -n "$adf_json" ]]; then
+    curl -s -X POST \
+      -H "Authorization: Basic $(jira_auth)" \
+      -H "Content-Type: application/json" \
+      "${JIRA_BASE_URL}/rest/api/3/issue/${key}/comment" \
+      -d "$adf_json" > /dev/null 2>&1
+    log_info "Rich comment posted to ${key} by ${agent_base} (${verdict})"
+  else
+    log_error "ADF generation failed for ${key}, falling back to plain text"
+    jira_add_comment "$key" "${first_name}: ${message}"
+  fi
+}
+
+jira_update_labels() {
+  local key="$1" remove_label="$2" add_label="$3"
+  curl -s -X PUT \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/issue/${key}" \
+    -d "{
+      \"update\": {
+        \"labels\": [
+          {\"remove\": \"${remove_label}\"},
+          {\"add\": \"${add_label}\"}
+        ]
+      }
+    }" > /dev/null 2>&1
+}
+
+jira_add_label() {
+  local key="$1" label="$2"
+  curl -s -X PUT \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/issue/${key}" \
+    -d "{
+      \"update\": {
+        \"labels\": [{\"add\": \"${label}\"}]
+      }
+    }" > /dev/null 2>&1
+}
+
+jira_transition() {
+  local key="$1" transition_name="$2"
+  # First get available transitions
+  local transitions
+  transitions=$(curl -s -X GET \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/issue/${key}/transitions")
+
+  local transition_id
+  transition_id=$(echo "$transitions" | python3 -c "
+import sys, json
+# Map English aliases to French transition names (Jira is in French)
+ALIASES = {
+    'done': ['terminé', 'done', 'terminee'],
+    'cours': ['en cours', 'in progress', 'cours'],
+    'review': ['in review', 'revue', 'review'],
+    'todo': ['a faire', 'à faire', 'to do', 'todo'],
+}
+data = json.load(sys.stdin)
+search = '$transition_name'.lower().strip()
+# Build list of terms to match against
+match_terms = [search]
+for key, aliases in ALIASES.items():
+    if search in aliases or search == key:
+        match_terms = aliases + [key]
+        break
+for t in data.get('transitions', []):
+    name_lower = t['name'].lower()
+    for term in match_terms:
+        if term in name_lower:
+            print(t['id'])
+            sys.exit(0)
+" 2>/dev/null)
+
+  if [[ -n "$transition_id" ]]; then
+    curl -s -X POST \
+      -H "Authorization: Basic $(jira_auth)" \
+      -H "Content-Type: application/json" \
+      "${JIRA_BASE_URL}/rest/api/3/issue/${key}/transitions" \
+      -d "{\"transition\": {\"id\": \"${transition_id}\"}}" > /dev/null 2>&1
+    log_info "Transitioned ${key} via transition ${transition_id} (${transition_name})"
+  else
+    log_error "Transition '${transition_name}' not found for ${key}"
+  fi
+}
+
+jira_assign_to_me() {
+  local key="$1"
+  # Get current user's account ID
+  local account_id
+  account_id=$(curl -s -X GET \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/myself" | python3 -c "import sys,json; print(json.load(sys.stdin).get('accountId',''))" 2>/dev/null)
+
+  if [[ -n "$account_id" ]]; then
+    curl -s -X PUT \
+      -H "Authorization: Basic $(jira_auth)" \
+      -H "Content-Type: application/json" \
+      "${JIRA_BASE_URL}/rest/api/3/issue/${key}/assignee" \
+      -d "{\"accountId\": \"${account_id}\"}" > /dev/null 2>&1
+    log_info "Assigned ${key} to ${JIRA_EMAIL}"
+  else
+    log_error "Could not get account ID for assignee"
+  fi
+}
+
+jira_link() {
+  local key="$1"
+  echo "${JIRA_BASE_URL}/browse/${key}"
+}
+
+jira_create_task() {
+  local summary="$1" description="$2" priority="${3:-Medium}" labels="${4:-}"
+  local labels_json="[]"
+  if [[ -n "$labels" ]]; then
+    labels_json=$(echo "$labels" | python3 -c "
+import sys, json
+labels = sys.stdin.read().strip().split(',')
+print(json.dumps([{'name': l.strip()} for l in labels if l.strip()]))
+")
+  fi
+
+  curl -s -X POST \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/issue" \
+    -d "{
+      \"fields\": {
+        \"project\": {\"key\": \"${JIRA_PROJECT}\"},
+        \"summary\": $(echo "$summary" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))'),
+        \"description\": {
+          \"type\": \"doc\", \"version\": 1,
+          \"content\": [{\"type\": \"paragraph\", \"content\": [{\"type\": \"text\", \"text\": $(echo "$description" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))')}]}]
+        },
+        \"issuetype\": {\"name\": \"Task\"},
+        \"priority\": {\"name\": \"${priority}\"},
+        \"labels\": ${labels_json}
+      }
+    }" 2>/dev/null
+}
+
+jira_search() {
+  local jql="$1" max_results="${2:-10}"
+  local jql_encoded
+  jql_encoded=$(printf '%s' "$jql" | sed 's/\\!/!/g' | python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.stdin.read()))")
+  curl -s -X GET \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/search/jql?jql=${jql_encoded}&maxResults=${max_results}&fields=key,summary,labels,status,priority" 2>/dev/null
+}
+
+jira_search_keys() {
+  local jql="$1" max_results="${2:-10}"
+  jira_search "$jql" "$max_results" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for issue in data.get('issues', []):
+    print(issue['key'])
+" 2>/dev/null
+}
+
+jira_search_keys_with_summaries() {
+  local jql="$1" max_results="${2:-10}"
+  jira_search "$jql" "$max_results" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for issue in data.get('issues', []):
+    key = issue['key']
+    summary = issue.get('fields', {}).get('summary', 'No summary')
+    print(f'{key}|{summary}')
+" 2>/dev/null
+}
+
+# ─── Slack ────────────────────────────────────────────────────────────────────
+
+# Agent identity mapping for Slack
+declare -A AGENT_SLACK_USERNAME=(
+  [salma]="Salma Ben Amor"
+  [youssef]="Youssef Trabelsi"
+  [nadia]="Nadia Chaari"
+  [karim]="Karim Bouazizi"
+  [omar]="Omar Jebali"
+  [layla]="Layla Mansouri"
+  [rami]="Rami Hammami"
+)
+declare -A AGENT_SLACK_EMOJI=(
+  [salma]=":clipboard:"
+  [youssef]=":hammer:"
+  [nadia]=":mag:"
+  [karim]=":gear:"
+  [omar]=":telescope:"
+  [layla]=":chart_with_upwards_trend:"
+  [rami]=":building_construction:"
+)
+declare -A AGENT_JOB_TITLE=(
+  [salma]="Product Manager"
+  [youssef]="Software Engineer"
+  [nadia]="QA Engineer"
+  [karim]="DevOps Engineer"
+  [omar]="Operations Lead"
+  [layla]="Product Strategist"
+  [rami]="Technical Architect"
+)
+AVATAR_BASE="http://49.13.225.201/avatars"
+declare -A AGENT_SLACK_AVATAR=(
+  [salma]="${AVATAR_BASE}/salma-v3.png"
+  [youssef]="${AVATAR_BASE}/youssef-v3.png"
+  [nadia]="${AVATAR_BASE}/nadia-v3.png"
+  [karim]="${AVATAR_BASE}/karim-v3.png"
+  [omar]="${AVATAR_BASE}/omar-v3.png"
+  [layla]="${AVATAR_BASE}/layla-v3.png"
+  [rami]="${AVATAR_BASE}/rami-v3.png"
+)
+
+# Route agent to correct Slack channel ID (for chat.postMessage API)
+_get_slack_channel_id() {
+  local channel="${1:-pipeline}"
+  case "$channel" in
+    pipeline) echo "${SLACK_CHANNEL_PIPELINE:-}" ;;
+    standup)  echo "${SLACK_CHANNEL_STANDUP:-}" ;;
+    sprint)   echo "${SLACK_CHANNEL_SPRINT:-}" ;;
+    alerts)   echo "${SLACK_CHANNEL_ALERTS:-}" ;;
+    *)        echo "" ;;
+  esac
+}
+
+# Fallback: Route to webhook URL if bot token not available
+_get_slack_webhook() {
+  local channel="${1:-pipeline}"
+  case "$channel" in
+    pipeline) echo "${SLACK_WEBHOOK_PIPELINE:-${SLACK_WEBHOOK_URL:-}}" ;;
+    standup)  echo "${SLACK_WEBHOOK_STANDUP:-${SLACK_WEBHOOK_URL:-}}" ;;
+    sprint)   echo "${SLACK_WEBHOOK_SPRINT:-${SLACK_WEBHOOK_URL:-}}" ;;
+    alerts)   echo "${SLACK_WEBHOOK_ALERTS:-${SLACK_WEBHOOK_URL:-}}" ;;
+    *)        echo "${SLACK_WEBHOOK_URL:-}" ;;
+  esac
+}
+
+# Strip markdown from Claude output for Slack (** bold **, ## headers, etc.)
+strip_markdown() {
+  sed 's/\*\*//g' | sed 's/^## //' | sed 's/^### //' | sed 's/^ISSUES://' | sed 's/^WARNINGS://' | sed '/^$/d'
+}
+
+# Main slack notification function
+# Usage: slack_notify "message" [channel] [color]
+# Channel defaults to "pipeline". Agent identity auto-detected from AGENT_NAME.
+# Color: "good" (green), "warning" (yellow), "danger" (red), or hex "#FF0000".
+# When color is set, message is sent as a colored attachment with job title as footer.
+# Uses chat.postMessage API (custom username/emoji) if SLACK_BOT_TOKEN is set,
+# otherwise falls back to incoming webhooks (no custom identity).
+slack_notify() {
+  local message="$1"
+  local channel="${2:-pipeline}"
+  local color="${3:-}"
+
+  # Resolve agent identity (strip ticket suffix for nadia-SCRUM-XX)
+  local agent_base="${AGENT_NAME%%\-SCRUM*}"
+  local username="${AGENT_SLACK_USERNAME[$agent_base]:-BisB Bot}"
+  local emoji="${AGENT_SLACK_EMOJI[$agent_base]:-:robot_face:}"
+  local avatar="${AGENT_SLACK_AVATAR[$agent_base]:-}"
+  local title="${AGENT_JOB_TITLE[$agent_base]:-}"
+
+  local json_msg
+  json_msg=$(echo -e "$message" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))')
+
+  # Build icon parameter: prefer avatar URL, fall back to emoji
+  local icon_param
+  if [[ -n "$avatar" ]]; then
+    icon_param="\"icon_url\": \"${avatar}\""
+  else
+    icon_param="\"icon_emoji\": \"${emoji}\""
+  fi
+
+  # Build footer with job title for colored attachments
+  local footer_param=""
+  if [[ -n "$title" ]]; then
+    footer_param=", \"footer\": \"${title}\""
+  fi
+
+  # Prefer chat.postMessage with Bot Token (supports custom username/avatar)
+  if [[ -n "${SLACK_BOT_TOKEN:-}" ]]; then
+    local channel_id
+    channel_id=$(_get_slack_channel_id "$channel")
+    if [[ -n "$channel_id" ]]; then
+      local api_payload
+      if [[ -n "$color" ]]; then
+        api_payload="{\"channel\": \"${channel_id}\", \"username\": \"${username}\", ${icon_param}, \"attachments\": [{\"color\": \"${color}\", \"text\": ${json_msg}, \"mrkdwn_in\": [\"text\"]${footer_param}}]}"
+      else
+        api_payload="{\"channel\": \"${channel_id}\", \"username\": \"${username}\", ${icon_param}, \"text\": ${json_msg}}"
+      fi
+      curl -s -X POST "https://slack.com/api/chat.postMessage" \
+        -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+        -H "Content-Type: application/json; charset=utf-8" \
+        -d "$api_payload" \
+        > /dev/null 2>&1
+      return 0
+    fi
+  fi
+
+  # Fallback to webhook (no custom identity — shows app name)
+  local webhook
+  webhook=$(_get_slack_webhook "$channel")
+  if [[ -z "$webhook" ]]; then
+    log_info "[Slack skip] $message"
+    return 0
+  fi
+
+  local webhook_payload
+  if [[ -n "$color" ]]; then
+    webhook_payload="{\"attachments\": [{\"color\": \"${color}\", \"text\": ${json_msg}, \"mrkdwn_in\": [\"text\"]${footer_param}}]}"
+  else
+    webhook_payload="{\"text\": ${json_msg}}"
+  fi
+  curl -s -X POST "$webhook" \
+    -H "Content-Type: application/json" \
+    -d "$webhook_payload" \
+    > /dev/null 2>&1
+}
+
+# ─── Git Helpers ──────────────────────────────────────────────────────────────
+# Base branch: agents PR into 'test', Hedi merges test→main
+BASE_BRANCH="${BASE_BRANCH:-master}"
+MAIN_BRANCH="${MAIN_BRANCH:-main}"
+
+ensure_clean_main() {
+  cd "$PROJECT_DIR"
+  # Stash any uncommitted changes
+  if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+    log_info "Stashing uncommitted changes"
+    git stash push -m "agent-stash-$(date +%s)" 2>/dev/null || true
+  fi
+  # Abort any in-progress rebase/merge from a previous crashed run
+  git rebase --abort 2>/dev/null || true
+  git merge --abort 2>/dev/null || true
+  git checkout "$BASE_BRANCH" 2>/dev/null || {
+    # If checkout fails (detached HEAD, conflict state), force reset
+    log_info "Checkout failed — force-resetting to ${BASE_BRANCH}"
+    git checkout -f "$BASE_BRANCH" 2>/dev/null || true
+  }
+  git fetch origin "$BASE_BRANCH" 2>/dev/null || true
+  git pull origin "$BASE_BRANCH" 2>/dev/null || {
+    # If pull fails (diverged), force-checkout to match remote
+    log_info "Pull failed — force-checkout to origin/${BASE_BRANCH}"
+    git checkout -B "$BASE_BRANCH" "origin/${BASE_BRANCH}" 2>/dev/null || true
+  }
+  log_info "On clean ${BASE_BRANCH} branch"
+}
+
+create_or_checkout_branch() {
+  local ticket="$1"
+  cd "$PROJECT_DIR"
+  local summary
+  summary=$(jira_get_ticket_field "$ticket" "summary")
+  # Create slug from summary
+  local slug
+  slug=$(echo "$summary" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | head -c 40 | sed 's/-$//')
+  local branch="feature/${ticket}-${slug}"
+
+  # Check if branch already exists (feedback loop from Nadia)
+  # Note: redirect all non-branch-name output to stderr so callers
+  # using $(create_or_checkout_branch ...) only capture the branch name
+  if git rev-parse --verify "$branch" >/dev/null 2>&1; then
+    log_info "Branch $branch already exists, checking out" >&2
+
+    # Check if branch is stale (missing commits from test)
+    # Count how many commits test has that the branch doesn't
+    local behind_count
+    behind_count=$(git rev-list --count "${branch}..origin/${BASE_BRANCH}" 2>/dev/null || echo "0")
+
+    if [[ "$behind_count" -gt 0 ]]; then
+      log_info "Branch is ${behind_count} commits behind ${BASE_BRANCH}" >&2
+
+      # Check if branch has its own commits (work in progress)
+      local ahead_count
+      ahead_count=$(git rev-list --count "origin/${BASE_BRANCH}..${branch}" 2>/dev/null || echo "0")
+
+      if [[ "$ahead_count" -eq 0 ]]; then
+        # Branch has no unique work — delete and recreate from fresh test
+        log_info "Branch has no unique commits — deleting stale branch and recreating" >&2
+        git branch -D "$branch" >/dev/null 2>&1 || true
+        git push origin --delete "$branch" >/dev/null 2>&1 || true
+        git checkout -b "$branch" >/dev/null 2>&1
+      else
+        # Branch has work — rebase onto latest test to pick up merged PRs
+        log_info "Branch has ${ahead_count} unique commits — rebasing onto ${BASE_BRANCH}" >&2
+        git checkout "$branch" >/dev/null 2>&1
+        git fetch origin "$branch" >/dev/null 2>&1 || true
+        if ! git rebase "origin/${BASE_BRANCH}" >/dev/null 2>&1; then
+          git rebase --abort 2>/dev/null || true
+          log_info "Rebase onto ${BASE_BRANCH} failed — deleting branch and starting fresh" >&2
+          git checkout "${BASE_BRANCH}" >/dev/null 2>&1
+          git branch -D "$branch" >/dev/null 2>&1 || true
+          git push origin --delete "$branch" >/dev/null 2>&1 || true
+          git checkout -b "$branch" >/dev/null 2>&1
+        fi
+      fi
+    else
+      # Branch is up to date with test — just check out
+      git checkout "$branch" >/dev/null 2>&1
+      git fetch origin "$branch" >/dev/null 2>&1 || true
+      if ! git pull origin "$branch" >/dev/null 2>&1; then
+        log_info "Pull failed (likely diverged) — rebasing onto remote" >&2
+        if ! git rebase "origin/$branch" >/dev/null 2>&1; then
+          git rebase --abort 2>/dev/null || true
+          log_info "Rebase failed — deleting and recreating from remote" >&2
+          git checkout "${BASE_BRANCH}" >/dev/null 2>&1
+          git branch -D "$branch" >/dev/null 2>&1 || true
+          git checkout -b "$branch" "origin/$branch" >/dev/null 2>&1
+        fi
+      fi
+    fi
+  else
+    log_info "Creating new branch: $branch" >&2
+    git checkout -b "$branch" >/dev/null 2>&1
+  fi
+  echo "$branch"
+}
+
+run_quality_checks() {
+  cd "$PROJECT_DIR"
+  local result=0
+
+  log_info "Running typecheck..."
+  if npm run typecheck 2>&1; then
+    log_info "Typecheck: PASS"
+  else
+    log_error "Typecheck: FAIL"
+    result=1
+  fi
+
+  log_info "Running lint..."
+  if npm run lint 2>&1; then
+    log_info "Lint: PASS"
+  else
+    log_error "Lint: FAIL"
+    result=1
+  fi
+
+  log_info "Running build..."
+  if npm run build 2>&1; then
+    log_info "Build: PASS"
+  else
+    log_error "Build: FAIL"
+    result=1
+  fi
+
+  return $result
+}
+
+get_diff_stats() {
+  cd "$PROJECT_DIR"
+  local lines_changed
+  lines_changed=$(git diff "$BASE_BRANCH" --stat 2>/dev/null | tail -1 | grep -oE '[0-9]+ insertion|[0-9]+ deletion' | awk '{s+=$1}END{print s+0}')
+  echo "${lines_changed:-0}"
+}
+
+# ─── PR Helpers ───────────────────────────────────────────────────────────────
+# Note: Avoid piping gh directly into head -1 — with pipefail, SIGPIPE from
+# head closing stdin kills the pipeline. Capture output first, then extract.
+find_pr_for_ticket() {
+  local ticket="$1"
+  cd "$PROJECT_DIR"
+  local result
+  result=$(gh pr list --state open --json number,title,headRefName,url \
+    --jq ".[] | select(.headRefName | contains(\"${ticket}\")) | .url" 2>/dev/null) || true
+  echo "$result" | head -1
+}
+
+find_pr_branch() {
+  local ticket="$1"
+  cd "$PROJECT_DIR"
+  local result
+  result=$(gh pr list --state open --json headRefName \
+    --jq ".[] | select(.headRefName | contains(\"${ticket}\")) | .headRefName" 2>/dev/null) || true
+  echo "$result" | head -1
+}
+
+find_open_pr_between_branches() {
+  local head_branch="$1" base_branch="$2"
+  cd "$PROJECT_DIR"
+  local result
+  result=$(gh pr list --state open --head "$head_branch" --base "$base_branch" \
+    --json url --jq ".[0].url" 2>/dev/null) || true
+  echo "$result"
+}
+
+# ─── Retry Counter ────────────────────────────────────────────────────────────
+RETRY_DIR="/tmp/bisb-retries"
+mkdir -p "$RETRY_DIR"
+
+get_retry_count() {
+  local ticket="$1" agent="$2"
+  local file="${RETRY_DIR}/${ticket}-${agent}"
+  if [[ -f "$file" ]]; then
+    cat "$file"
+  else
+    echo "0"
+  fi
+}
+
+increment_retry() {
+  local ticket="$1" agent="$2"
+  local file="${RETRY_DIR}/${ticket}-${agent}"
+  local count
+  count=$(get_retry_count "$ticket" "$agent")
+  echo $(( count + 1 )) > "$file"
+}
+
+reset_retry() {
+  local ticket="$1" agent="$2"
+  rm -f "${RETRY_DIR}/${ticket}-${agent}"
+}
+
+# ─── Structured Feedback ─────────────────────────────────────────────────────
+FEEDBACK_DIR="/tmp/bisb-feedback"
+mkdir -p "$FEEDBACK_DIR"
+
+write_feedback() {
+  local ticket="$1" agent="$2" verdict="$3" issues="$4"
+  local file="${FEEDBACK_DIR}/${ticket}.txt"
+  cat > "$file" <<FEOF
+AGENT: ${agent}
+VERDICT: ${verdict}
+TIMESTAMP: $(date '+%Y-%m-%d %H:%M:%S')
+ISSUES:
+${issues}
+FEOF
+}
+
+read_feedback() {
+  local ticket="$1"
+  local file="${FEEDBACK_DIR}/${ticket}.txt"
+  if [[ -f "$file" ]]; then
+    cat "$file"
+  else
+    echo ""
+  fi
+}
+
+clear_feedback() {
+  local ticket="$1"
+  rm -f "${FEEDBACK_DIR}/${ticket}.txt"
+}
+
+# ─── Activity Log (daily narrative report) ──────────────────────────────────
+REPORT_DIR="${SCRIPT_DIR}/../reports"
+mkdir -p "$REPORT_DIR"
+
+log_activity() {
+  local agent="$1" ticket="$2" verdict="$3" description="$4"
+  local report_file="${REPORT_DIR}/$(date +%Y-%m-%d).log"
+  echo "$(date +%H:%M)|${agent}|${ticket}|${verdict}|${description}" >> "$report_file"
+}
+
+# ─── Model Selection ───────────────────────────────────────────────────────
+# Select AI model based on ticket labels and priority.
+# Priority: 1) model:X label override, 2) priority, 3) label heuristics, 4) default
+select_model_for_ticket() {
+  local labels="$1" priority="$2"
+  # 1. Explicit label override (e.g. model:opus, model:haiku)
+  if echo "$labels" | grep -qi "model:opus"; then echo "opus"; return; fi
+  if echo "$labels" | grep -qi "model:haiku"; then echo "haiku"; return; fi
+  # 2. Priority-based
+  if [[ "$priority" == "Highest" ]]; then echo "sonnet"; return; fi
+  # 3. Label heuristics
+  if echo "$labels" | grep -qiE "infrastructure|devops|migration|security|legal"; then
+    echo "sonnet"; return
+  fi
+  if echo "$labels" | grep -qiE "documentation|typo|config|cleanup"; then
+    echo "haiku"; return
+  fi
+  # 4. Default
+  echo "sonnet"
+}
+
+# ─── Sensitive File Detection ─────────────────────────────────────────────
+# Returns 0 (true) if any file in the list matches agent-sensitive patterns.
+# Usage: has_sensitive_files "file1\nfile2\nfile3"
+has_sensitive_files() {
+  local files="$1"
+  if echo "$files" | grep -qE '^(ai/|n8n/scripts/agent-)'; then
+    return 0  # true — sensitive files detected
+  fi
+  return 1  # false
+}
+
+# Upgrade model to opus if PR touches sensitive agent files.
+# Usage: upgrade_model_for_sensitive_files CURRENT_MODEL "file1\nfile2"
+upgrade_model_for_sensitive_files() {
+  local model="$1" files="$2"
+  if has_sensitive_files "$files"; then
+    log_info "Sensitive agent files detected — upgrading model to opus"
+    echo "opus"
+  else
+    echo "$model"
+  fi
+}
+
+# ─── Feedback-Aware Model Selection ──────────────────────────────────────
+# Escalates model based on retry count and feedback severity.
+# Max escalation = Sonnet. Opus only via explicit model:opus label or sensitive files.
+# Usage: select_model_with_feedback LABELS PRIORITY TICKET_KEY AGENT_NAME [BASE_MODEL]
+select_model_with_feedback() {
+  local labels="$1" priority="$2" ticket="$3" agent="$4" base_model="${5:-}"
+
+  # 1. Start with base model (label/priority heuristics or provided default)
+  local model="${base_model:-$(select_model_for_ticket "$labels" "$priority")}"
+
+  # 2. Explicit label always wins — no escalation needed
+  if echo "$labels" | grep -qi "model:opus\|model:haiku"; then
+    echo "$model"
+    return
+  fi
+
+  # 3. Check retry count
+  local retries
+  retries=$(get_retry_count "$ticket" "$agent")
+
+  # 4. Check feedback severity
+  local feedback
+  feedback=$(read_feedback "$ticket")
+  local has_critical=false
+  local issue_count=0
+  if [[ -n "$feedback" ]]; then
+    issue_count=$(echo "$feedback" | grep -c "^- " 2>/dev/null || true)
+    [[ -z "$issue_count" ]] && issue_count=0
+    if echo "$feedback" | grep -qi "critical\|security\|vulnerability\|hardcoded.*secret\|data loss\|auth.*bypass"; then
+      has_critical=true
+    fi
+  fi
+
+  # 5. Escalation rules (max = sonnet, never auto-opus)
+  local escalated=false
+  if [[ "$has_critical" == "true" && "$model" == "haiku" ]]; then
+    model="sonnet"; escalated=true
+    log_info "Model escalated to sonnet (critical/security feedback)"
+  elif (( retries > 0 )) && [[ "$model" == "haiku" ]]; then
+    model="sonnet"; escalated=true
+    log_info "Model escalated to sonnet (retry ${retries})"
+  elif (( issue_count >= 5 )) && [[ "$model" == "haiku" ]]; then
+    model="sonnet"; escalated=true
+    log_info "Model escalated to sonnet (${issue_count} issues in feedback)"
+  fi
+
+  if [[ "$escalated" == "false" ]]; then
+    log_info "Model: ${model} (no escalation needed)"
+  fi
+
+  echo "$model"
+}
+
+# ─── Early-Stop on Repeat Failures ──────────────────────────────────────────
+# Detects if the same failure signature repeats across retries.
+# Returns 0 (true) if same failure, 1 (false) if different.
+check_repeat_failure() {
+  local ticket="$1" agent="$2" new_issues="$3"
+  local prev_file="${FEEDBACK_DIR}/${ticket}-prev.txt"
+  local curr_sig
+  curr_sig=$(echo "$new_issues" | grep "^- " | sort | md5 2>/dev/null || echo "none")
+
+  if [[ -f "$prev_file" ]]; then
+    local prev_sig
+    prev_sig=$(cat "$prev_file")
+    if [[ "$curr_sig" == "$prev_sig" ]]; then
+      log_info "Same failure signature detected for ${ticket}/${agent} — recommend blocking"
+      return 0  # true = same failure
+    fi
+  fi
+
+  echo "$curr_sig" > "$prev_file"
+  return 1  # false = different failure
+}
+
+# ─── Jira Subtask Creation ────────────────────────────────────────────────
+# Create a subtask under a parent ticket, assigned to the current user (Hedi).
+# Usage: jira_create_subtask PARENT_KEY "Summary" "Description"
+jira_create_subtask() {
+  local parent_key="$1" summary="$2" description="$3"
+  local account_id
+  account_id=$(jira_curl -X GET \
+    "${JIRA_BASE_URL}/rest/api/3/myself" \
+    | python3 -c "import sys,json; print(json.load(sys.stdin).get('accountId',''))" 2>/dev/null)
+
+  # Escape strings for JSON
+  local json_summary json_desc
+  json_summary=$(python3 -c "import json; print(json.dumps('''${summary}'''))")
+  json_desc=$(python3 -c "import json; print(json.dumps('''${description}'''))")
+
+  curl -s -X POST \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/issue" \
+    -d "{
+      \"fields\": {
+        \"project\": {\"key\": \"${JIRA_PROJECT}\"},
+        \"parent\": {\"key\": \"${parent_key}\"},
+        \"summary\": ${json_summary},
+        \"description\": {\"type\":\"doc\",\"version\":1,\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":${json_desc}}]}]},
+        \"issuetype\": {\"name\": \"Subtask\"},
+        \"assignee\": {\"accountId\": \"${account_id}\"}
+      }
+    }" | python3 -c "import sys,json; print(json.load(sys.stdin).get('key',''))" 2>/dev/null
+}
+
+# ─── Idempotent Human Subtask ──────────────────────────────────────────────
+# Creates a subtask only if one with the same prefix doesn't already exist.
+# Prevents duplicate subtasks on re-runs.
+# Usage: create_human_subtask PARENT_KEY AGENT_NAME "Summary" "Description"
+create_human_subtask() {
+  local parent_key="$1" agent="$2" summary="$3" description="$4"
+  local prefix="[HUMAN][${agent}]"
+
+  # Check if subtask already exists (search by summary prefix under parent)
+  local existing
+  existing=$(curl -s -X POST \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/search/jql" \
+    -d "{\"jql\":\"parent = ${parent_key} AND summary ~ \\\"${prefix}\\\" AND statusCategory != Done\",\"fields\":[\"key\"],\"maxResults\":1}" \
+    | python3 -c "import sys,json; issues=json.load(sys.stdin).get('issues',[]); print(issues[0]['key'] if issues else '')" 2>/dev/null)
+
+  if [[ -n "$existing" ]]; then
+    log_info "Human subtask already exists: ${existing} — updating comment instead"
+    jira_add_comment "$existing" "${agent}: Updated — ${description}"
+    echo "$existing"
+    return
+  fi
+
+  # Create new subtask
+  local subtask_key
+  subtask_key=$(jira_create_subtask "$parent_key" "${prefix} ${summary}" "$description")
+  if [[ -n "$subtask_key" ]]; then
+    log_info "Created human subtask: ${subtask_key}"
+  fi
+  echo "$subtask_key"
+}
+
+# ─── Jira Label Helpers ─────────────────────────────────────────────────────
+# Remove a specific label from a ticket
+jira_remove_label() {
+  local key="$1" label="$2"
+  curl -s -X PUT \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/issue/${key}" \
+    -d "{\"update\":{\"labels\":[{\"remove\":\"${label}\"}]}}" > /dev/null 2>&1
+}
+
+# ─── Jira Ticket Creation (for Salma splits) ──────────────────────────────
+# Create a new standalone ticket (not subtask)
+jira_create_ticket() {
+  local summary="$1" description="$2" parent_ref="$3"
+  local json_summary json_desc
+  json_summary=$(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$summary")
+  json_desc=$(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$description")
+
+  curl -s -X POST \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/issue" \
+    -d "{
+      \"fields\": {
+        \"project\": {\"key\": \"${JIRA_PROJECT}\"},
+        \"summary\": ${json_summary},
+        \"description\": {\"type\":\"doc\",\"version\":1,\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":${json_desc}}]}]},
+        \"issuetype\": {\"name\": \"Task\"},
+        \"labels\": [\"split-from:${parent_ref}\"]
+      }
+    }" | python3 -c "import sys,json; print(json.load(sys.stdin).get('key',''))" 2>/dev/null
+}
+
+# ─── Sprint Management ───────────────────────────────────────────────────
+
+# Get the active sprint ID for the SCRUM board
+jira_get_active_sprint_id() {
+  curl -s -X GET \
+    -H "Authorization: Basic $(jira_auth)" \
+    "${JIRA_BASE_URL}/rest/agile/1.0/board/1/sprint?state=active,future" \
+    | python3 -c "import sys,json; sprints=json.load(sys.stdin).get('values',[]); active=[s for s in sprints if s['state']=='active']; future=[s for s in sprints if s['state']=='future']; s=active[0] if active else (future[0] if future else None); print(s['id'] if s else '')" 2>/dev/null
+}
+
+# Move an issue into a sprint
+# Usage: jira_move_to_sprint ISSUE_KEY SPRINT_ID
+jira_move_to_sprint() {
+  local key="$1" sprint_id="$2"
+  if [[ -z "$sprint_id" ]]; then
+    log_error "No sprint ID provided for ${key}"
+    return 1
+  fi
+  curl -s -X POST \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/agile/1.0/sprint/${sprint_id}/issue" \
+    -d "{\"issues\":[\"${key}\"]}" > /dev/null 2>&1
+  log_info "Moved ${key} to sprint ${sprint_id}"
+}
+
+# ─── Jira Description Update ──────────────────────────────────────────────
+
+# Simple text description update
+jira_update_description() {
+  local key="$1" description="$2"
+  local json_desc
+  json_desc=$(python3 -c "import json,sys; print(json.dumps(sys.argv[1]))" "$description")
+  curl -s -X PUT \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/issue/${key}" \
+    -d "{\"fields\":{\"description\":{\"type\":\"doc\",\"version\":1,\"content\":[{\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":${json_desc}}]}]}}}" > /dev/null 2>&1
+}
+
+# Rich ADF description update (supports markdown-like text → ADF conversion)
+# Usage: jira_update_description_adf KEY "ADF_JSON_STRING"
+# The ADF must be a valid Atlassian Document Format JSON object
+jira_update_description_adf() {
+  local key="$1" adf_json="$2"
+  curl -s -X PUT \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/issue/${key}" \
+    -d "{\"fields\":{\"description\":${adf_json}}}" > /dev/null 2>&1
+}
+
+# Update a single Jira field (e.g., story points, assignee, etc.)
+# Usage: jira_update_field KEY FIELD_NAME VALUE
+# Example: jira_update_field "SCRUM-123" "customfield_10016" "5"
+jira_update_field() {
+  local key="$1" field_name="$2" value="$3"
+  curl -s -X PUT \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/issue/${key}" \
+    -d "{\"fields\":{\"${field_name}\":${value}}}" > /dev/null 2>&1
+}
+
+# Convert markdown-like spec text to rich ADF with agent-colored panels
+# Usage: jira_set_spec KEY AGENT_NAME "SPEC_TEXT"
+# AGENT_NAME determines panel color: salma=info(blue), youssef=success(green),
+# nadia=error(red), karim=warning(orange)
+jira_set_spec() {
+  local key="$1" agent="$2" spec_text="$3"
+
+  local panel_type="info"
+  case "$agent" in
+    salma)   panel_type="info" ;;     # blue
+    youssef) panel_type="success" ;;  # green
+    nadia)   panel_type="error" ;;    # red
+    karim)   panel_type="warning" ;;  # orange
+    *)       panel_type="note" ;;     # purple
+  esac
+
+  local agent_display="${AGENT_SLACK_USERNAME[$agent]:-$agent}"
+
+  # Build ADF using python (handles escaping properly)
+  local adf_json
+  adf_json=$(python3 -c "
+import json, sys
+
+spec_text = sys.argv[1]
+agent_display = sys.argv[2]
+panel_type = sys.argv[3]
+
+# Parse spec_text into ADF content blocks
+lines = spec_text.strip().split('\n')
+content_blocks = []
+
+for line in lines:
+    stripped = line.strip()
+    if not stripped:
+        continue
+    elif stripped.startswith('## '):
+        content_blocks.append({
+            'type': 'heading', 'attrs': {'level': 2},
+            'content': [{'type': 'text', 'text': stripped[3:]}]
+        })
+    elif stripped.startswith('### '):
+        content_blocks.append({
+            'type': 'heading', 'attrs': {'level': 3},
+            'content': [{'type': 'text', 'text': stripped[4:]}]
+        })
+    elif stripped.startswith('- [ ] ') or stripped.startswith('- [x] '):
+        # Checkbox item — add as bullet with status prefix
+        checked = stripped.startswith('- [x] ')
+        text = stripped[6:]
+        prefix = '✅ ' if checked else '☐ '
+        content_blocks.append({
+            'type': 'paragraph',
+            'content': [{'type': 'text', 'text': prefix + text}]
+        })
+    elif stripped.startswith('- '):
+        content_blocks.append({
+            'type': 'paragraph',
+            'content': [{'type': 'text', 'text': '• ' + stripped[2:]}]
+        })
+    else:
+        content_blocks.append({
+            'type': 'paragraph',
+            'content': [{'type': 'text', 'text': stripped}]
+        })
+
+# Wrap in panel
+doc = {
+    'type': 'doc',
+    'version': 1,
+    'content': [
+        {
+            'type': 'panel',
+            'attrs': {'panelType': panel_type},
+            'content': [
+                {
+                    'type': 'heading', 'attrs': {'level': 3},
+                    'content': [
+                        {'type': 'text', 'text': agent_display, 'marks': [{'type': 'strong'}]}
+                    ]
+                }
+            ] + content_blocks
+        }
+    ]
+}
+
+print(json.dumps(doc))
+" "$spec_text" "$agent_display" "$panel_type" 2>/dev/null)
+
+  if [[ -n "$adf_json" ]]; then
+    jira_update_description_adf "$key" "$adf_json"
+    log_info "Updated description for ${key} with ${agent} spec (${panel_type} panel)"
+  else
+    log_error "Failed to generate ADF for ${key}"
+    # Fallback to plain text
+    jira_update_description "$key" "$spec_text"
+  fi
+}
+
+# ─── Cooldown Check ─────────────────────────────────────────────────────────
+COOLDOWN_SECONDS=900  # 15 minutes — matches cron interval
+
+check_cooldown() {
+  local ticket="$1" agent="$2"
+  local file="${RETRY_DIR}/${ticket}-${agent}"
+  if [[ -f "$file" ]]; then
+    local age=$(( $(date +%s) - $(stat -c %Y "$file" 2>/dev/null || stat -f %m "$file" 2>/dev/null || echo 0) ))
+    if (( age < COOLDOWN_SECONDS )); then
+      log_info "Cooldown active for ${ticket}/${agent} (${age}s < ${COOLDOWN_SECONDS}s). Skipping."
+      return 1
+    fi
+  fi
+  return 0
+}
+
+# ─── Layla Report Access ─────────────────────────────────────────────────────
+# Returns Layla's latest daily market intelligence report if it exists and
+# was generated today or yesterday (still relevant).
+get_layla_report() {
+  local report_file="/tmp/bisb-layla-latest-report.md"
+  local date_file="/tmp/bisb-layla-latest-report-date.txt"
+  if [[ -f "$report_file" && -f "$date_file" ]]; then
+    local report_date
+    report_date=$(cat "$date_file")
+    local today
+    today=$(date -u +%Y-%m-%d)
+    local yesterday
+    yesterday=$(date -u -d "yesterday" +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d 2>/dev/null || echo "")
+    if [[ "$report_date" == "$today" || "$report_date" == "$yesterday" ]]; then
+      echo "## Latest Market Intelligence (${report_date})"
+      head -100 "$report_file"
+    fi
+  fi
+}
+
+# ─── Hedi Message Access ────────────────────────────────────────────────────
+# Returns any pending messages from Hedi for a specific agent.
+# Messages are stored in /tmp/bisb-hedi-messages/{agent}-{timestamp}.md
+# Usage: get_hedi_messages "nadia"
+get_hedi_messages() {
+  local agent_name="$1"
+  local msg_dir="/tmp/bisb-hedi-messages"
+  [[ -d "$msg_dir" ]] || return 0
+
+  local found=false
+  for msg_file in "${msg_dir}/${agent_name}"-*.md; do
+    [[ -f "$msg_file" ]] || continue
+    if [[ "$found" == "false" ]]; then
+      echo "## Messages from Hedi"
+      found=true
+    fi
+    echo "---"
+    cat "$msg_file"
+    echo ""
+    # Archive after reading (move to .read suffix)
+    mv "$msg_file" "${msg_file}.read" 2>/dev/null || true
+  done
+}
+
+# ─── Initialization ──────────────────────────────────────────────────────────
+load_env

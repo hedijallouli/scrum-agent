@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# BisB Agent Cron — runs every 15 min weekdays 8-20 UTC
+set -euo pipefail
+
+ENV_FILE="/opt/bisb/.env.agents"
+LOG_DIR="/opt/bisb/n8n/logs"
+SCRIPTS_DIR="/opt/bisb/n8n/scripts"
+PAUSE_FILE="/tmp/bisb-agents-paused"
+
+source "$ENV_FILE"
+
+if [ -f "$PAUSE_FILE" ]; then
+  echo "[$(date)] BisB agents paused, skipping run"
+  exit 0
+fi
+
+echo "[$(date)] === BisB agent cron starting ==="
+
+# Pull latest code
+cd /opt/bisb && git pull origin master --rebase 2>&1 | tail -3
+
+# Ensure dependencies are installed
+cd /opt/bisb && npm install --silent 2>&1 | tail -3
+
+# Daily Layla report (first run of the day only)
+LAYLA_DAILY_FLAG="/tmp/bisb-layla-daily-$(date +%Y-%m-%d)"
+if [ \! -f "$LAYLA_DAILY_FLAG" ]; then
+  echo "[$(date)] Running Layla daily report..."
+  touch "$LAYLA_DAILY_FLAG"
+  timeout 300 bash "${SCRIPTS_DIR}/agent-layla-daily.sh" >> "${LOG_DIR}/agent-layla.log" 2>&1 || {
+    echo "[$(date)] Layla daily report failed/timed out"
+  }
+fi
+
+# Omar runs without ticket (ops watchdog)
+echo "[$(date)] Running Omar (ops)..."
+timeout 120 bash "${SCRIPTS_DIR}/agent-omar.sh" >> "${LOG_DIR}/agent-omar.log" 2>&1 || {
+  echo "[$(date)] Omar failed/timed out"
+}
+
+# Jira auth for ticket queries
+JIRA_AUTH=$(echo -n "${JIRA_EMAIL}:${JIRA_API_TOKEN}" | base64)
+
+# Ticket-based agents: query Jira for assigned tickets
+for agent in salma layla rami youssef nadia karim; do
+  JQL="project=${JIRA_PROJECT} AND labels=agent:${agent} AND statusCategory != Done"
+  ENCODED_JQL=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$JQL")
+  TICKETS=$(curl -s \
+    -H "Authorization: Basic ${JIRA_AUTH}" \
+    "${JIRA_BASE_URL}/rest/api/3/search/jql?jql=${ENCODED_JQL}&fields=key&maxResults=5" \
+    | python3 -c 'import sys,json; [print(i["key"]) for i in json.load(sys.stdin).get("issues",[])]' 2>/dev/null || true)
+
+  if [ -z "$TICKETS" ]; then
+    continue
+  fi
+
+  for ticket in $TICKETS; do
+    echo "[$(date)] Running agent-${agent} on ${ticket}..."
+    timeout 600 bash "${SCRIPTS_DIR}/agent-${agent}.sh" "$ticket" \
+      >> "${LOG_DIR}/agent-${agent}.log" 2>&1 || {
+      echo "[$(date)] agent-${agent} failed/timed out on ${ticket}"
+    }
+  done
+done
+
+echo "[$(date)] === BisB agent cron complete ==="

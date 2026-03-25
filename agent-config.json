@@ -1,0 +1,34 @@
+{
+  "project_key": "BISB",
+  "name": "Business is Business",
+  "repo": "hedijallouli/businessIsbusiness",
+  "base_branch": "master",
+  "stack": {
+    "runtime": "npm",
+    "test": "npm test --workspace=@bisb/engine",
+    "build": "npm run build --workspace=@bisb/web",
+    "lint": "npm run lint",
+    "typecheck": "npm run typecheck"
+  },
+  "paths": {
+    "source": ["packages/"],
+    "config": [".gitignore", "package.json", "tsconfig*.json"],
+    "docs": ["*.md", "ai/"]
+  },
+  "agents": {
+    "salma": { "role": "pm", "prompt_file": "ai/pm.md" },
+    "youssef": { "role": "dev", "prompt_file": "ai/dev.md", "max_parallel": 3 },
+    "nadia": { "role": "qa", "prompt_file": "ai/qa.md", "max_parallel": 3 },
+    "rami": { "role": "devops", "prompt_file": "ai/architect.md", "max_parallel": 3 },
+    "layla": { "role": "product", "prompt_file": "ai/product.md", "max_parallel": 1 },
+    "omar": { "role": "ops", "prompt_file": "ai/ops.md" }
+  },
+  "qa_rules": "ai/qa.md",
+  "architecture_rules": "ai/architect.md",
+  "game_rules": "BisB/Regle du jeu BISB.pdf",
+  "domain": "game",
+  "domain_context": "Tunisian board game digitization",
+  "capacity_allocation": 1.0,
+  "max_pr_lines": 300,
+  "cost_budget_daily_calls": 150
+}

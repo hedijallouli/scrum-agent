@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# BisB Agent Cron — runs every 15 min weekdays 8-20 UTC
+set -euo pipefail
+
+ENV_FILE="/opt/bisb/.env.agents"
+LOG_DIR="/opt/bisb/n8n/logs"
+SCRIPTS_DIR="/opt/bisb/n8n/scripts"
+PAUSE_FILE="/tmp/bisb-agents-paused"
+
+set -a
+source "$ENV_FILE"
+set +a
+
+if [ -f "$PAUSE_FILE" ]; then
+  echo "[$(date)] BisB agents paused, skipping run"
+  exit 0
+fi
+
+# Lock file to prevent concurrent runs
+LOCK_FILE="/tmp/bisb-cron.lock"
+if [ -f "$LOCK_FILE" ]; then
+  LOCK_PID=$(cat "$LOCK_FILE" 2>/dev/null)
+  if kill -0 "$LOCK_PID" 2>/dev/null; then
+    echo "[$(date)] Another cron run is active (PID $LOCK_PID), skipping"
+    exit 0
+  else
+    echo "[$(date)] Stale lock file found (PID $LOCK_PID dead), removing"
+    rm -f "$LOCK_FILE"
+  fi
+fi
+echo $$ > "$LOCK_FILE"
+trap 'rm -f /tmp/bisb-cron.lock' EXIT
+
+echo "[$(date)] === BisB agent cron starting ==="
+
+# Pull latest code
+cd /opt/bisb && git stash -q 2>/dev/null; git pull origin master --rebase 2>&1 | tail -3 || echo "[WARNING] git pull failed, continuing with current code"
+
+# Ensure dependencies are installed
+cd /opt/bisb && npm install --silent 2>&1 | tail -3
+
+# Daily Layla report (first run of the day only)
+LAYLA_DAILY_FLAG="/tmp/bisb-layla-daily-$(date +%Y-%m-%d)"
+if [ ! -f "$LAYLA_DAILY_FLAG" ]; then
+  echo "[$(date)] Running Layla daily report..."
+  touch "$LAYLA_DAILY_FLAG"
+  timeout 300 bash "${SCRIPTS_DIR}/agent-layla-daily.sh" >> "${LOG_DIR}/agent-layla.log" 2>&1 || {
+    echo "[$(date)] Layla daily report failed/timed out"
+  }
+fi
+
+# Omar runs without ticket (ops watchdog)
+echo "[$(date)] Running Omar (ops)..."
+timeout 120 bash "${SCRIPTS_DIR}/agent-omar.sh" >> "${LOG_DIR}/agent-omar.log" 2>&1 || {
+  echo "[$(date)] Omar failed/timed out"
+}
+
+# Ticket-based agents: query Jira for assigned tickets
+# NOTE: Using python3 requests instead of curl because curl HTTP/2 is broken on this VPS (curl 8.5.0 bug)
+for agent in salma layla rami youssef nadia karim; do
+  JQL="project=${JIRA_PROJECT} AND labels=agent:${agent} AND statusCategory not in (Done) AND sprint in openSprints()"
+  TICKETS=$(python3 "${SCRIPTS_DIR}/jira-query.py" "$JQL" 2>>"${LOG_DIR}/cron.log" || true)
+
+  if [ -z "$TICKETS" ]; then
+    continue
+  fi
+
+  for ticket in $TICKETS; do
+    echo "[$(date)] Running agent-${agent} on ${ticket}..."
+    timeout 600 bash "${SCRIPTS_DIR}/agent-${agent}.sh" "$ticket" \
+      >> "${LOG_DIR}/agent-${agent}.log" 2>&1 || {
+      echo "[$(date)] agent-${agent} failed/timed out on ${ticket}"
+    }
+  done
+done
+
+echo "[$(date)] === BisB agent cron complete ==="

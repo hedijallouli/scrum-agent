@@ -1,0 +1,314 @@
+#!/usr/bin/env bash
+# =============================================================================
+# agent-cron.sh — Cron dispatcher: polls Jira for agent-labeled tickets
+# Runs every 15 minutes via crontab.
+# All agents run in PARALLEL — each has its own lock file via run-agent.sh.
+# =============================================================================
+AGENT_NAME="dispatcher"
+set -euo pipefail
+
+# Prevent overlapping dispatcher runs
+CRON_LOCKFILE="/tmp/bisb-agent-cron.lock"
+exec 200>"$CRON_LOCKFILE"
+flock -n 200 || { echo "[$(date)] Previous dispatcher still running, skipping this cycle."; exit 0; }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/agent-common.sh"
+
+init_log "cron" "dispatcher"
+
+# ─── Pause Check ────────────────────────────────────────────────────────────
+PAUSE_FLAG="/tmp/bisb-agents-paused"
+if [[ -f "$PAUSE_FLAG" ]]; then
+  log_info "Agents PAUSED (flag file exists: $PAUSE_FLAG). Skipping this cycle."
+  exit 0
+fi
+
+# ─── Pull latest code ──────────────────────────────────────────────────────
+cd "$PROJECT_DIR"
+git stash -q 2>/dev/null || true
+BEFORE_HASH=$(md5sum "${BASH_SOURCE[0]}" 2>/dev/null | cut -d' ' -f1 || true)
+PULL_OUTPUT=$(git pull origin master --rebase 2>&1 || true)
+echo "$PULL_OUTPUT" | grep -v "^$" | head -3
+AFTER_HASH=$(md5sum "${BASH_SOURCE[0]}" 2>/dev/null | cut -d' ' -f1 || true)
+if [[ -n "$BEFORE_HASH" && "$BEFORE_HASH" != "$AFTER_HASH" ]]; then
+  log_info "agent-cron.sh updated — re-executing with new version..."
+  exec "${BASH_SOURCE[0]}" "$@"
+fi
+
+log_info "=== Agent Dispatcher starting (parallel mode) ==="
+
+# ─── Check for Hedi messages in Slack ────────────────────────────────────────
+check_hedi_messages() {
+  local CHANNEL_ID="${SLACK_CHANNEL_PIPELINE:-}"
+  [[ -z "$CHANNEL_ID" ]] && return 0
+  [[ -z "${SLACK_BOT_TOKEN:-}" ]] && return 0
+
+  local LAST_CHECK_FILE="/tmp/bisb-hedi-lastcheck"
+  local OLDEST
+  OLDEST=$(cat "$LAST_CHECK_FILE" 2>/dev/null || echo "0")
+
+  local API_RESPONSE
+  API_RESPONSE=$(curl -s -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+    "https://slack.com/api/conversations.history?channel=${CHANNEL_ID}&oldest=${OLDEST}&limit=20" 2>/dev/null) || return 0
+
+  local LATEST_TS
+  LATEST_TS=$(echo "$API_RESPONSE" | python3 -c "
+import sys, json, re, os
+
+data = json.load(sys.stdin)
+if not data.get('ok'):
+    sys.exit(0)
+
+msg_dir = '/tmp/bisb-hedi-messages'
+os.makedirs(msg_dir, exist_ok=True)
+valid_agents = ['salma', 'youssef', 'nadia', 'karim', 'omar', 'layla', 'rami']
+latest_ts = '0'
+
+for msg in data.get('messages', []):
+    ts = msg.get('ts', '0')
+    if ts > latest_ts:
+        latest_ts = ts
+    if 'bot_id' in msg or msg.get('subtype'):
+        continue
+    text = msg.get('text', '')
+    agent = None
+    content = None
+
+    m = re.match(r'@(\w+)\s+(.*)', text, re.DOTALL)
+    if m and m.group(1).lower() in valid_agents:
+        agent, content = m.group(1).lower(), m.group(2).strip()
+
+    if not agent:
+        m = re.match(r'(\w+)[,:]\s+(.*)', text, re.DOTALL)
+        if m and m.group(1).lower() in valid_agents:
+            agent, content = m.group(1).lower(), m.group(2).strip()
+
+    if agent and content:
+        safe_ts = ts.replace('.', '-')
+        filepath = os.path.join(msg_dir, f'{agent}-{safe_ts}.md')
+        with open(filepath, 'w') as f:
+            f.write(content)
+        print(f'Saved message for {agent}', file=sys.stderr)
+
+print(latest_ts)
+" 2>>"${LOG_FILE:-/dev/null}") || true
+
+  if [[ -n "$LATEST_TS" && "$LATEST_TS" != "0" ]]; then
+    echo "$LATEST_TS" > "$LAST_CHECK_FILE"
+  fi
+}
+
+check_hedi_messages
+
+# ─── Spawn all agents in parallel ───────────────────────────────────────────
+log_info "Spawning all agents in parallel..."
+
+process_agent() {
+  local label="$1" agent="$2"
+  local jql="project = ${JIRA_PROJECT} AND labels = '${label}' AND labels = 'sprint-active' AND labels NOT IN ('blocked') AND statusCategory != 'Done' ORDER BY priority DESC, created ASC"
+
+  log_info "Checking for ${label} tickets..."
+  local tickets
+  tickets=$(jira_search_keys "$jql" "1")
+
+  if [[ -n "$tickets" ]]; then
+    local ticket
+    ticket=$(echo "$tickets" | head -1)
+    log_info "Found ticket: ${ticket} for ${agent}"
+    "${SCRIPT_DIR}/run-agent.sh" "$ticket" "$agent"
+    return 0
+  fi
+
+  log_info "No ${label} tickets found."
+  return 0
+}
+
+process_agent "agent:salma"   "salma"   &
+PID_SALMA=$!
+
+process_agent "agent:youssef" "youssef" &
+PID_YOUSSEF=$!
+
+# Nadia — run up to 3 reviews in parallel
+NADIA_JQL="project = ${JIRA_PROJECT} AND labels = 'agent:nadia' AND labels = 'sprint-active' AND labels NOT IN ('blocked') AND statusCategory != 'Done' ORDER BY priority DESC, created ASC"
+NADIA_TICKETS=$(jira_search_keys "$NADIA_JQL" "3")
+NADIA_PIDS=()
+if [[ -n "$NADIA_TICKETS" ]]; then
+  while IFS= read -r nadia_ticket; do
+    [[ -z "$nadia_ticket" ]] && continue
+    log_info "Found ticket: ${nadia_ticket} for nadia"
+    "${SCRIPT_DIR}/run-agent.sh" "$nadia_ticket" "nadia" &
+    NADIA_PIDS+=($!)
+  done <<< "$NADIA_TICKETS"
+  log_info "Spawned ${#NADIA_PIDS[@]} Nadia review(s) in parallel"
+else
+  log_info "No agent:nadia tickets found."
+fi
+
+process_agent "agent:karim"   "karim"   &
+PID_KARIM=$!
+
+process_agent "agent:layla"   "layla"   &
+PID_LAYLA=$!
+
+process_agent "agent:rami"    "rami"    &
+PID_RAMI=$!
+
+# Omar (Ops) — health checks
+"${SCRIPT_DIR}/agent-omar.sh" &
+PID_OMAR=$!
+
+# Layla daily market intelligence report (once per day)
+LAYLA_DAILY_FLAG="/tmp/bisb-layla-daily-$(date +%Y-%m-%d)"
+PID_LAYLA_DAILY=""
+if [[ ! -f "$LAYLA_DAILY_FLAG" ]]; then
+  log_info "Running Layla's daily market intelligence report..."
+  "${SCRIPT_DIR}/agent-layla-daily.sh" &
+  PID_LAYLA_DAILY=$!
+fi
+
+# ─── Wait for all agents ────────────────────────────────────────────────────
+log_info "Waiting for all agents to complete (Salma=${PID_SALMA}, Youssef=${PID_YOUSSEF}, Nadia=${NADIA_PIDS[*]:-none}, Karim=${PID_KARIM}, Layla=${PID_LAYLA}, Rami=${PID_RAMI}, Omar=${PID_OMAR})..."
+
+FAILED=0
+wait $PID_SALMA   || { log_info "Salma finished with error"; FAILED=$((FAILED+1)); }
+wait $PID_YOUSSEF || { log_info "Youssef finished with error"; FAILED=$((FAILED+1)); }
+for npid in "${NADIA_PIDS[@]}"; do
+  wait "$npid" || { log_info "Nadia (PID $npid) finished with error"; FAILED=$((FAILED+1)); }
+done
+wait $PID_KARIM   || { log_info "Karim finished with error"; FAILED=$((FAILED+1)); }
+wait $PID_LAYLA   || { log_info "Layla finished with error"; FAILED=$((FAILED+1)); }
+wait $PID_RAMI    || { log_info "Rami finished with error"; FAILED=$((FAILED+1)); }
+wait $PID_OMAR    || { log_info "Omar finished with error"; FAILED=$((FAILED+1)); }
+if [[ -n "${PID_LAYLA_DAILY:-}" ]]; then
+  wait $PID_LAYLA_DAILY || { log_info "Layla daily report finished with error"; FAILED=$((FAILED+1)); }
+fi
+
+if (( FAILED > 0 )); then
+  log_info "${FAILED} agent(s) had errors (check individual logs)"
+else
+  log_info "All agents completed successfully"
+fi
+
+# ─── Sprint completion check ─────────────────────────────────────────────────
+check_sprint_completion() {
+  local remaining
+  remaining=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels = 'sprint-active' AND statusCategory != 'Done' AND labels NOT IN ('ready-for-merge') ORDER BY priority DESC" "50")
+
+  if [[ -z "$remaining" ]]; then
+    local total_sprint
+    total_sprint=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels = 'sprint-active' ORDER BY priority DESC" "50")
+    if [[ -n "$total_sprint" ]]; then
+      local count
+      count=$(echo "$total_sprint" | wc -l | tr -d ' ')
+      log_info "Sprint complete! All ${count} tickets done or ready-for-merge"
+      touch "$PAUSE_FLAG"
+      log_info "Agents auto-paused (sprint complete)"
+      slack_notify "Sprint complete — all ${count} tickets done. Agents auto-paused. Ready for review."
+    fi
+  fi
+}
+
+check_sprint_completion
+
+# ─── Backlog monitoring ──────────────────────────────────────────────────────
+check_backlog_health() {
+  local backlog_count
+  backlog_count=$(jira_search "project = ${JIRA_PROJECT} AND statusCategory = 'To Do' AND labels NOT IN ('sprint-active', 'enriched', 'blocked') ORDER BY priority DESC" "50" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('issues', [])))" 2>/dev/null || echo "0")
+
+  if (( backlog_count < 5 )); then
+    log_info "Backlog running low: ${backlog_count} tickets"
+    local flag_file="/tmp/bisb-backlog-alert-$(date +%Y-%m-%d)"
+    if [[ ! -f "$flag_file" ]]; then
+      slack_notify "Backlog running low — only *${backlog_count}* unplanned tickets left."
+      touch "$flag_file"
+    fi
+  fi
+}
+
+check_backlog_health
+
+# ─── Omar Smart Cycle Summary (Haiku-powered) ───────────────────────────────
+log_info "Generating Omar's smart cycle summary with Haiku..."
+
+CYCLE_LOG_CONTEXT=""
+
+CYCLE_START_LINE=$(grep -n "Agent Dispatcher starting" "${LOG_DIR}/cron.log" 2>/dev/null | tail -1 | cut -d: -f1 || true)
+if [[ -n "$CYCLE_START_LINE" ]]; then
+  CRON_ERRORS=$(tail -n +"$CYCLE_START_LINE" "${LOG_DIR}/cron.log" 2>/dev/null \
+    | grep -iE 'ERROR|FAIL|syntax error|BLOCK|exit code|push.*error' | tail -15 || true)
+else
+  CRON_ERRORS=$(tail -30 "${LOG_DIR}/cron.log" 2>/dev/null \
+    | grep -iE 'ERROR|FAIL|syntax error|BLOCK|exit code|push.*error' | tail -15 || true)
+fi
+[[ -n "$CRON_ERRORS" ]] && CYCLE_LOG_CONTEXT+="THIS CYCLE'S ERRORS:
+${CRON_ERRORS}
+
+"
+
+REPORT_FILE="${REPORT_DIR}/$(date +%Y-%m-%d).log"
+if [[ -f "$REPORT_FILE" ]]; then
+  CYCLE_START=$(date -d '16 minutes ago' +%H:%M 2>/dev/null || date -v-16M +%H:%M 2>/dev/null || echo "00:00")
+  CYCLE_ENTRIES=$(grep -v 'STANDUP' "$REPORT_FILE" | awk -F'|' -v start="$CYCLE_START" '$1 ~ /^[0-9]/ && $1 >= start' 2>/dev/null || true)
+  [[ -n "$CYCLE_ENTRIES" ]] && CYCLE_LOG_CONTEXT+="THIS CYCLE'S ACTIVITY:
+${CYCLE_ENTRIES}
+
+"
+  DONE_COUNT=$(grep -c '|MERGED' "$REPORT_FILE" 2>/dev/null || true)
+  CYCLE_LOG_CONTEXT+="MERGES TODAY: ${DONE_COUNT}
+"
+
+  STUCK=$(grep -E '\|FAIL|\|BLOCKED|\|NEEDS_REBASE' "$REPORT_FILE" 2>/dev/null \
+    | awk -F'|' '{print $3}' | sort | uniq -c | sort -rn \
+    | awk '$1 >= 3 {printf "%s (%d attempts) ", $2, $1}' || true)
+  [[ -n "$STUCK" ]] && CYCLE_LOG_CONTEXT+="STUCK TICKETS: ${STUCK}
+"
+fi
+
+if [[ -n "$CYCLE_LOG_CONTEXT" ]]; then
+  OMAR_PROMPT="Write a 2-4 sentence Slack summary of this agent pipeline cycle. Output ONLY the summary text — no preamble, no explanation.
+
+RULES:
+- FOCUS ON PROBLEMS: errors, failures, blocked tickets, stuck agents. Only mention successes if nothing went wrong.
+- Be specific: name tickets (BISB-XX), quote short error messages.
+- If a ticket is failing repeatedly, flag it: 'BISB-XX has failed N times — [reason]'.
+- If nothing went wrong, output exactly: Quiet cycle — all agents healthy.
+- Max 4 sentences. No markdown headers. No thinking out loud.
+
+LOG DATA:
+${CYCLE_LOG_CONTEXT}"
+
+  OMAR_PROMPT_FILE=$(mktemp /tmp/omar-prompt-XXXXXX.txt)
+  OMAR_STDOUT_FILE=$(mktemp /tmp/omar-stdout-XXXXXX.txt)
+  OMAR_STDERR_FILE=$(mktemp /tmp/omar-stderr-XXXXXX.txt)
+  echo "$OMAR_PROMPT" > "$OMAR_PROMPT_FILE"
+
+  cd "$PROJECT_DIR" && claude -p - \
+    --disallowedTools "Read Write Edit Glob Grep Bash" \
+    --model haiku --max-turns 2 \
+    < "$OMAR_PROMPT_FILE" \
+    > "$OMAR_STDOUT_FILE" 2> "$OMAR_STDERR_FILE" || true
+
+  OMAR_SUMMARY=$(cat "$OMAR_STDOUT_FILE")
+  OMAR_STDERR=$(cat "$OMAR_STDERR_FILE")
+  rm -f "$OMAR_PROMPT_FILE" "$OMAR_STDOUT_FILE" "$OMAR_STDERR_FILE"
+
+  [[ -n "$OMAR_STDERR" ]] && log_info "Haiku stderr: $(echo "$OMAR_STDERR" | head -3)"
+
+  OMAR_SUMMARY=$(echo "$OMAR_SUMMARY" | grep -v "^Error:" | grep -v "^Reached max turns" || true)
+
+  if [[ -n "$OMAR_SUMMARY" && ${#OMAR_SUMMARY} -gt 10 ]]; then
+    SAVED_AGENT="$AGENT_NAME"
+    AGENT_NAME="omar"
+    slack_notify "$OMAR_SUMMARY" "pipeline" "good"
+    AGENT_NAME="$SAVED_AGENT"
+    log_info "Smart cycle summary posted"
+  else
+    log_info "Haiku returned empty/short output — skipping summary"
+  fi
+else
+  log_info "Quiet cycle — no log context to analyze"
+fi
+
+log_success "=== Agent Dispatcher finished ==="
