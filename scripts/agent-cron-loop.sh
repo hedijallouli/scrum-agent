@@ -3,24 +3,24 @@
 # agent-cron-loop.sh — Forced dispatch loop (used by Omar via DM)
 #
 # Runs agent-cron.sh --force every 5 minutes until:
-#   - Stop flag exists: /tmp/bisb-omar-loop.stop
+#   - Stop flag exists: /tmp/${PROJECT_PREFIX}-omar-loop.stop
 #   - Or max cycles reached (optional $1 arg, default=unlimited)
 #   - Or killed externally
 #
 # Usage: agent-cron-loop.sh [max_cycles]
-# PID stored in: /tmp/bisb-omar-loop.pid
-# Stop flag:     /tmp/bisb-omar-loop.stop
+# PID stored in: /tmp/${PROJECT_PREFIX}-omar-loop.pid
+# Stop flag:     /tmp/${PROJECT_PREFIX}-omar-loop.stop
 # =============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAX_CYCLES="${1:-48}"  # Default 48 cycles = 12 hours, then auto-expire
-STOP_FLAG="/tmp/bisb-omar-loop.stop"
-PID_FILE="/tmp/bisb-omar-loop.pid"
-LOOP_LOG="/var/log/bisb/omar-force-loop-$(date +%Y-%m-%d).log"
+STOP_FLAG="/tmp/${PROJECT_PREFIX}-omar-loop.stop"
+PID_FILE="/tmp/${PROJECT_PREFIX}-omar-loop.pid"
+LOOP_LOG="${LOG_DIR}/omar-force-loop-$(date +%Y-%m-%d).log"
 INTERVAL=900  # 15 minutes (matches cron interval — avoids double-dispatch)
 
-mkdir -p /var/log/bisb
+mkdir -p ${LOG_DIR}
 
 # Cleanup previous state
 rm -f "$STOP_FLAG"
@@ -60,7 +60,7 @@ while true; do
     sleep 10
     [[ -f "$STOP_FLAG" ]] && break
     # Respect pause flag — don't burn CPU when agents are paused
-    if [[ -f "/tmp/bisb-agents-paused" ]]; then
+    if [[ -f "/tmp/${PROJECT_PREFIX}-agents-paused" ]]; then
       log "Agents paused — sleeping 60s before next check"
       sleep 60
       continue

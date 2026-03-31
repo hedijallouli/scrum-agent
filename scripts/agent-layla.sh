@@ -243,7 +243,7 @@ Claude returned empty output. Will retry on next cycle."
 fi
 
 # Write output to temp file for reliable parsing (avoids echo|grep issues with large outputs)
-LAYLA_TMPFILE=$(mktemp /tmp/bisb-layla-XXXXXX.txt)
+LAYLA_TMPFILE=$(mktemp /tmp/${PROJECT_PREFIX}-layla-XXXXXX.txt)
 printf '%s\n' "$CLAUDE_OUTPUT" > "$LAYLA_TMPFILE"
 VERDICT=$(parse_verdict "$LAYLA_TMPFILE")
 rm -f "$LAYLA_TMPFILE"
@@ -277,7 +277,7 @@ ${RICE_SCORE:+RICE: ${RICE_SCORE}}" "pipeline" "good"
     SUGGESTED=$(echo "$CLAUDE_OUTPUT" | grep -oP "SUGGESTED_CHANGES:\s*\K.*" | head -1 || true)
 
     # Write feedback file for Salma
-    FEEDBACK_DIR="/tmp/bisb-feedback"
+    FEEDBACK_DIR="/tmp/${PROJECT_PREFIX}-feedback"
     mkdir -p "$FEEDBACK_DIR"
     cat > "${FEEDBACK_DIR}/${TICKET_KEY}.txt" <<FEEDEOF
 AGENT: layla

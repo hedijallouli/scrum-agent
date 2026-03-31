@@ -489,7 +489,7 @@ fi
 
 # Check for standup round-table decisions
 STANDUP_CONTEXT=""
-STANDUP_DECISION_FILE="/tmp/bisb-standup-decisions/${TICKET_KEY}.md"
+STANDUP_DECISION_FILE="/tmp/${PROJECT_PREFIX}-standup-decisions/${TICKET_KEY}.md"
 if [[ -f "$STANDUP_DECISION_FILE" ]] && printf "%s\n" "$LABELS" | grep -q "was-discussed-in-standup" 2>/dev/null; then
   STANDUP_DECISION=$(cat "$STANDUP_DECISION_FILE")
   STANDUP_CONTEXT="
@@ -612,7 +612,7 @@ if [[ -z "$CLAUDE_OUTPUT" ]]; then
 fi
 
 # Check for key sections — write to temp file to avoid pipe/quoting issues
-SPEC_TMPFILE=$(mktemp /tmp/bisb-spec-XXXXXX.txt)
+SPEC_TMPFILE=$(mktemp /tmp/${PROJECT_PREFIX}-spec-XXXXXX.txt)
 printf '%s\n' "$CLAUDE_OUTPUT" > "$SPEC_TMPFILE"
 log_info "Output length: ${#CLAUDE_OUTPUT} chars, $(wc -l < "$SPEC_TMPFILE") lines"
 HAS_SUMMARY=false
@@ -656,7 +656,7 @@ fi
 
 # Hard gate: Test Cases section is required
 HAS_TEST_CASES=false
-SPEC_TMPFILE2=$(mktemp /tmp/bisb-spec-XXXXXX.txt)
+SPEC_TMPFILE2=$(mktemp /tmp/${PROJECT_PREFIX}-spec-XXXXXX.txt)
 printf '%s\n' "$CLAUDE_OUTPUT" > "$SPEC_TMPFILE2"
 if grep -qi "## Test Cases" "$SPEC_TMPFILE2"; then
   HAS_TEST_CASES=true

@@ -12,7 +12,7 @@ init_log "$AGENT_NAME" "weekly"
 
 # ─── Dedup: once per week ───────────────────────────────────────────────────
 WEEK_ID=$(date -u +%Y-W%V)
-FLAG_FILE="/tmp/bisb-layla-weekly-${WEEK_ID}"
+FLAG_FILE="/tmp/${PROJECT_PREFIX}-layla-weekly-${WEEK_ID}"
 if [[ -f "$FLAG_FILE" ]]; then
   log_info "Weekly report already generated for $WEEK_ID"
   exit 0
@@ -37,7 +37,7 @@ ${IN_PROGRESS}"
 fi
 
 # ─── Get latest daily report for context ─────────────────────────────────────
-LATEST_DAILY=$(cat /tmp/bisb-layla-latest-report.md 2>/dev/null || echo "No recent daily report available.")
+LATEST_DAILY=$(cat /tmp/${PROJECT_PREFIX}-layla-latest-report.md 2>/dev/null || echo "No recent daily report available.")
 
 # ─── Get Hedi's recent messages ─────────────────────────────────────────────
 HEDI_MESSAGES=$(get_hedi_messages 2>/dev/null || echo "No recent messages from Hedi.")
@@ -110,7 +110,7 @@ fi
 slack_notify "layla" "📊 *BISB Weekly Report — Week ${WEEK_ID}*\n\n${TRUNCATED_REPORT}"
 
 # ─── Save report ─────────────────────────────────────────────────────────────
-echo "$WEEKLY_REPORT" > /tmp/bisb-layla-weekly-report.md
+echo "$WEEKLY_REPORT" > /tmp/${PROJECT_PREFIX}-layla-weekly-report.md
 touch "$FLAG_FILE"
 
 log_success "Weekly report generated and posted for $WEEK_ID"

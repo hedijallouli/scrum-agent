@@ -62,13 +62,13 @@ fi
 
 # ─── Per-ticket locks for parallel agents ─────────────────────────────────
 if [[ "$AGENT" == "nadia" ]]; then
-  LOCK_FILE="/tmp/bisb-agent-nadia-${TICKET_KEY}.lock"
+  LOCK_FILE="/tmp/${PROJECT_PREFIX}-agent-nadia-${TICKET_KEY}.lock"
 fi
 if [[ "$AGENT" == "youssef" ]]; then
-  LOCK_FILE="/tmp/bisb-agent-youssef-${TICKET_KEY}.lock"
+  LOCK_FILE="/tmp/${PROJECT_PREFIX}-agent-youssef-${TICKET_KEY}.lock"
 fi
 if [[ "$AGENT" == "rami" ]]; then
-  LOCK_FILE="/tmp/bisb-agent-rami-${TICKET_KEY}.lock"
+  LOCK_FILE="/tmp/${PROJECT_PREFIX}-agent-rami-${TICKET_KEY}.lock"
 fi
 
 # ─── Acquire lock ───────────────────────────────────────────────────────────
@@ -83,7 +83,7 @@ cd "$PROJECT_DIR"
 git checkout "${BASE_BRANCH}" -q 2>/dev/null || true
 
 # ─── Per-ticket brief: load cross-run memory ────────────────────────────────
-BRIEF_DIR="/tmp/bisb-notes"
+BRIEF_DIR="/tmp/${PROJECT_PREFIX}-notes"
 mkdir -p "$BRIEF_DIR"
 TICKET_BRIEF_FILE="${BRIEF_DIR}/${TICKET_KEY}.md"
 if [[ -f "$TICKET_BRIEF_FILE" ]]; then
@@ -101,7 +101,7 @@ log_json "INFO" "agent_start" "\"ticket\":\"${TICKET_KEY}\",\"agent\":\"${AGENT}
 event_log "$TICKET_KEY" "$AGENT" "agent_start" "{\"run_id\":\"${RUN_ID}\"}" 2>/dev/null || true
 
 EXIT_CODE=0
-STDERR_FILE=$(mktemp /tmp/bisb-stderr-XXXXXX.txt)
+STDERR_FILE=$(mktemp /tmp/${PROJECT_PREFIX}-stderr-XXXXXX.txt)
 timeout 1800 "${SCRIPT_DIR}/agent-${AGENT}.sh" "$TICKET_KEY" 2>"$STDERR_FILE" || EXIT_CODE=$?
 
 DURATION=$(( $(date +%s) - START_TIME ))

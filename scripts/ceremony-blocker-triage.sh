@@ -14,7 +14,7 @@
 # #alerts channel as a threaded discussion.
 #
 # Usage: ceremony-blocker-triage.sh BISB-XX "Reason for blocker"
-# Log:   /var/log/bisb/blocker-triage-BISB-XX.log
+# Log:   ${LOG_DIR}/blocker-triage-BISB-XX.log
 # =============================================================================
 set -euo pipefail
 
@@ -32,8 +32,8 @@ load_env
 source "${SCRIPT_DIR}/tracker-common.sh"
 source "${SCRIPT_DIR}/ceremony-common.sh"
 
-LOG_FILE="/var/log/bisb/blocker-triage-${TICKET_KEY}.log"
-mkdir -p /var/log/bisb
+LOG_FILE="${LOG_DIR}/blocker-triage-${TICKET_KEY}.log"
+mkdir -p ${LOG_DIR}
 log_info "=== BisB Blocker Triage: ${TICKET_KEY} ==="
 log_info "Reason: ${BLOCKER_REASON}"
 
@@ -42,7 +42,7 @@ TICKET_SUMMARY=$(jira_get_ticket_field "$TICKET_KEY" "summary" 2>/dev/null || ec
 TICKET_DESCRIPTION=$(jira_get_description_text "$TICKET_KEY" 2>/dev/null || echo "")
 TICKET_LINK=$(mm_ticket_link "$TICKET_KEY" 2>/dev/null || echo "$TICKET_KEY")
 
-RETRY_COUNT=$(cat "/tmp/bisb-retries/${TICKET_KEY}" 2>/dev/null || echo "3")
+RETRY_COUNT=$(cat "/tmp/${PROJECT_PREFIX}-retries/${TICKET_KEY}" 2>/dev/null || echo "3")
 
 SPRINT_JSON=$(get_sprint_data 2>/dev/null || echo '{"sprint_name":"Sprint actuel","days_left":0,"done_count":0,"inprog_count":0,"todo_count":0,"velocity":0}')
 SPRINT_NAME=$(echo "$SPRINT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('sprint_name','Sprint actuel'))" 2>/dev/null || echo "Sprint actuel")

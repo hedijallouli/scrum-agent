@@ -18,7 +18,7 @@
 #   - Alerts via Slack/Mattermost on critical issues
 #
 # Triggered: hourly via cron
-# Log: /var/log/bisb/watchdog.log
+# Log: ${LOG_DIR}/watchdog.log
 # =============================================================================
 set -euo pipefail
 
@@ -29,8 +29,8 @@ AGENT_NAME="omar"
 source "${SCRIPT_DIR}/agent-common.sh"
 load_env
 
-LOG_FILE="/var/log/bisb/watchdog.log"
-mkdir -p /var/log/bisb
+LOG_FILE="${LOG_DIR}/watchdog.log"
+mkdir -p ${LOG_DIR}
 
 ALERTS=0
 HEALED=0
@@ -80,7 +80,7 @@ DISK_PCT=$(df / --output=pcent 2>/dev/null | tail -1 | tr -d '% ' || echo "0")
 if (( DISK_PCT >= 90 )); then
   alert "CRITICAL" "Disk usage at ${DISK_PCT}%"
   # Auto-clean old logs
-  find /var/log/bisb/ -name "*.log" -mtime +7 -delete 2>/dev/null && heal "Cleaned old logs" || true
+  find ${LOG_DIR}/ -name "*.log" -mtime +7 -delete 2>/dev/null && heal "Cleaned old logs" || true
   clean_cache 2>/dev/null && heal "Cleaned response cache" || true
 elif (( DISK_PCT >= 80 )); then
   alert "WARN" "Disk usage at ${DISK_PCT}%"
@@ -90,7 +90,7 @@ fi
 log_info "Check 3: Stale locks..."
 LOCK_MAX=1800  # 30 min
 
-for lockfile in /tmp/bisb-agent-*.lock; do
+for lockfile in /tmp/${PROJECT_PREFIX}-agent-*.lock; do
   [[ -f "$lockfile" ]] || continue
   lock_age=$(( NOW - $(stat -c %Y "$lockfile" 2>/dev/null || echo 0) ))
   if (( lock_age > LOCK_MAX )); then
@@ -102,7 +102,7 @@ for lockfile in /tmp/bisb-agent-*.lock; do
 done
 
 # DM poller lock
-DM_LOCK="/tmp/bisb-dm-poller.lock"
+DM_LOCK="/tmp/${PROJECT_PREFIX}-dm-poller.lock"
 if [[ -f "$DM_LOCK" ]]; then
   dm_age=$(( NOW - $(stat -c %Y "$DM_LOCK" 2>/dev/null || echo 0) ))
   if (( dm_age > 600 )); then
@@ -118,7 +118,7 @@ clean_blacklist 2>/dev/null && heal "Cleaned blacklist" || true
 clean_backoff 2>/dev/null && heal "Cleaned backoff" || true
 
 # Clean expired circuit breakers
-for cb_file in "${CB_DIR:-/tmp/bisb-circuit-breakers}"/*.state; do
+for cb_file in "${CB_DIR:-/tmp/${PROJECT_PREFIX}-circuit-breakers}"/*.state; do
   [[ -f "$cb_file" ]] || continue
   local_count=0 local_ts=0 local_until=0
   IFS='|' read -r local_count local_ts local_until < "$cb_file" 2>/dev/null || continue
@@ -129,7 +129,7 @@ for cb_file in "${CB_DIR:-/tmp/bisb-circuit-breakers}"/*.state; do
 done
 
 # Clean poison pill file (entries older than 48h)
-POISON_FILE="/tmp/bisb-poison-pills"
+POISON_FILE="/tmp/${PROJECT_PREFIX}-poison-pills"
 if [[ -f "$POISON_FILE" ]]; then
   tmp=$(mktemp)
   while IFS='|' read -r t ts; do
@@ -156,12 +156,12 @@ done
 
 # ─── 6. Cron health ─────────────────────────────────────────────────────────
 log_info "Check 6: Cron health..."
-CRON_LOG="/var/log/bisb/cron.log"
+CRON_LOG="${LOG_DIR}/cron.log"
 if [[ -f "$CRON_LOG" ]]; then
   cron_age=$(( NOW - $(stat -c %Y "$CRON_LOG" 2>/dev/null || echo 0) ))
   if (( cron_age > 1200 )); then  # 20 min (should run every 15)
     # Only alert if agents are not paused
-    if [[ ! -f "/tmp/bisb-agents-paused" ]]; then
+    if [[ ! -f "/tmp/${PROJECT_PREFIX}-agents-paused" ]]; then
       alert "WARN" "Cron not running? Last log update ${cron_age}s ago"
     fi
   fi

@@ -12,7 +12,7 @@ source "${SCRIPT_DIR}/agent-common.sh"
 init_log "daily-report" "layla"
 log_info "=== Layla (Product Strategist) starting daily market intelligence ==="
 
-DAILY_FLAG="/tmp/bisb-layla-daily-$(date +%Y-%m-%d)"
+DAILY_FLAG="/tmp/${PROJECT_PREFIX}-layla-daily-$(date +%Y-%m-%d)"
 
 # Already ran today
 if [[ -f "$DAILY_FLAG" ]]; then
@@ -43,9 +43,9 @@ log_info "Today's focus: $DAY_FOCUS"
 
 # ─── 1c. Load previous reports to avoid repetition ───────────────────────────
 PREV_REPORTS=""
-if [[ -f /tmp/bisb-layla-latest-report.md ]]; then
-  PREV_DATE=$(cat /tmp/bisb-layla-latest-report-date.txt 2>/dev/null || echo "unknown")
-  PREV_SUMMARY=$(head -30 /tmp/bisb-layla-latest-report.md 2>/dev/null | grep "^##" || true)
+if [[ -f /tmp/${PROJECT_PREFIX}-layla-latest-report.md ]]; then
+  PREV_DATE=$(cat /tmp/${PROJECT_PREFIX}-layla-latest-report-date.txt 2>/dev/null || echo "unknown")
+  PREV_SUMMARY=$(head -30 /tmp/${PROJECT_PREFIX}-layla-latest-report.md 2>/dev/null | grep "^##" || true)
   PREV_REPORTS="YOUR PREVIOUS REPORT (${PREV_DATE}) COVERED:
 ${PREV_SUMMARY}
 
@@ -134,9 +134,9 @@ ${REPORT_SLACK}" "pipeline" "good"
   fi
 
   # Save report to file for other agents to consume
-  echo "$REPORT_OUTPUT" > /tmp/bisb-layla-latest-report.md
-  echo "$(date -u +%Y-%m-%d)" > /tmp/bisb-layla-latest-report-date.txt
-  log_info "Report saved to /tmp/bisb-layla-latest-report.md"
+  echo "$REPORT_OUTPUT" > /tmp/${PROJECT_PREFIX}-layla-latest-report.md
+  echo "$(date -u +%Y-%m-%d)" > /tmp/${PROJECT_PREFIX}-layla-latest-report-date.txt
+  log_info "Report saved to /tmp/${PROJECT_PREFIX}-layla-latest-report.md"
 
   touch "$DAILY_FLAG"
   log_activity "layla" "DAILY" "REPORT" "Daily market intelligence posted"

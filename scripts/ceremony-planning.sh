@@ -28,8 +28,8 @@ AGENT_NAME="salma"
 source "${SCRIPT_DIR}/agent-common.sh"
 source "${SCRIPT_DIR}/ceremony-common.sh"
 
-LOG_FILE="/var/log/bisb/ceremony-planning-$(date '+%Y-%m-%dT%H:%M:%S').log"
-mkdir -p /var/log/bisb
+LOG_FILE="${LOG_DIR}/ceremony-planning-$(date '+%Y-%m-%dT%H:%M:%S').log"
+mkdir -p ${LOG_DIR}
 log_info "=== Sprint Planning Starting ==="
 
 # ─────────────────────────────────────────────────────────────────────────────

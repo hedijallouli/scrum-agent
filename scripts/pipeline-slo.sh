@@ -39,7 +39,7 @@ slo_alert() {
 # ─── 1. Retry Storm Detection ────────────────────────────────────────────────
 # Checks if retry rate is abnormally high (>10 retries in 15 min)
 retry_storm_check() {
-  local backoff_dir="${BACKOFF_DIR:-/tmp/bisb-backoff}"
+  local backoff_dir="${BACKOFF_DIR:-/tmp/${PROJECT_PREFIX}-backoff}"
   [[ -d "$backoff_dir" ]] || return 0
 
   local now
@@ -69,7 +69,7 @@ retry_storm_check() {
 # ─── 2. Circuit Breaker Flapping Detection ────────────────────────────────────
 # Checks structured log for frequent open/close cycles
 breaker_flap_check() {
-  local structured_log="${STRUCTURED_LOG:-/var/log/bisb/structured.log}"
+  local structured_log="${STRUCTURED_LOG:-${LOG_DIR}/structured.log}"
   [[ -f "$structured_log" ]] || return 0
 
   local now

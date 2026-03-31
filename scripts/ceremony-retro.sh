@@ -21,8 +21,8 @@ AGENT_NAME="omar"
 source "${SCRIPT_DIR}/agent-common.sh"
 source "${SCRIPT_DIR}/ceremony-common.sh"
 
-LOG_FILE="/var/log/bisb/ceremony-retro-$(date '+%Y-%m-%dT%H:%M:%S').log"
-mkdir -p /var/log/bisb
+LOG_FILE="${LOG_DIR}/ceremony-retro-$(date '+%Y-%m-%dT%H:%M:%S').log"
+mkdir -p ${LOG_DIR}
 log_info "=== Sprint Retrospective Starting ==="
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ fi
 # Retry / stuck ticket count
 TOTAL_RETRIES=0
 STUCK_TICKETS=""
-for retry_file in /tmp/bisb-retries/${PROJECT_KEY}-*; do
+for retry_file in /tmp/${PROJECT_PREFIX}-retries/${PROJECT_KEY}-*; do
   [[ -f "$retry_file" ]] || continue
   cnt=$(cat "$retry_file" 2>/dev/null || echo "0")
   TOTAL_RETRIES=$(( TOTAL_RETRIES + cnt ))
@@ -74,7 +74,7 @@ for retry_file in /tmp/bisb-retries/${PROJECT_KEY}-*; do
 done
 
 # Recent log errors
-RECENT_ERRORS=$(tail -100 /var/log/bisb/cron.log 2>/dev/null \
+RECENT_ERRORS=$(tail -100 ${LOG_DIR}/cron.log 2>/dev/null \
   | grep -iE 'error|fail|stuck|blocked|timeout' | tail -10 \
   || echo "Aucune erreur récente")
 

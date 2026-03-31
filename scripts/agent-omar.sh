@@ -89,7 +89,7 @@ fi
 # ─── 1. Blocked tickets (Plane state-based) ─────────────────────────────────
 log_info "Check 1: Blocked tickets..."
 if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
-  _bl_script=$(mktemp /tmp/bisb-omar-bl-XXXXXX.py)
+  _bl_script=$(mktemp /tmp/${PROJECT_PREFIX}-omar-bl-XXXXXX.py)
   cat > "$_bl_script" << 'BLPYEOF'
 import os, requests
 OMAR_ID = "435563ee-fef1-4cab-9048-653e0e7bb74a"
@@ -176,7 +176,7 @@ done
 
 # ─── 2. Stale locks ─────────────────────────────────────────────────────────
 log_info "Check 2: Stale agent locks..."
-for lockfile in /tmp/bisb-agent-*.lock; do
+for lockfile in /tmp/${PROJECT_PREFIX}-agent-*.lock; do
   [[ -f "$lockfile" ]] || continue
   # Skip our own lock
   [[ "$lockfile" == *"omar.lock" ]] && continue
@@ -240,7 +240,7 @@ fi
 # In Plane mode: find tickets in active states with NO assignee, auto-assign.
 log_info "Check 7: Orphaned (unassigned active) tickets..."
 if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
-  _op_script=$(mktemp /tmp/bisb-omar-op-XXXXXX.py)
+  _op_script=$(mktemp /tmp/${PROJECT_PREFIX}-omar-op-XXXXXX.py)
   cat > "$_op_script" << 'OPPYEOF'
 import os, requests
 base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
@@ -306,7 +306,7 @@ fi
 # ─── 8. Sprint completion detection ──────────────────────────────────────────
 # When ALL sprint-active tickets are Done → trigger Review → Refinement → Retro chain
 log_info "Check 8: Sprint completion..."
-SPRINT_COMPLETION_FLAG="/tmp/bisb-sprint-complete-$(date +%Y-%m-%d)"
+SPRINT_COMPLETION_FLAG="/tmp/${PROJECT_PREFIX}-sprint-complete-$(date +%Y-%m-%d)"
 
 if [[ ! -f "$SPRINT_COMPLETION_FLAG" ]]; then
   if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
@@ -345,7 +345,7 @@ print(f'{done}/{total}')
     log_info "Sprint complete! All ${SPRINT_ALL} tickets done. Triggering review chain."
 
     # ─── Velocity tracking: calculate sprint person-days ───────────────
-    SPRINT_NUM_FILE="/tmp/bisb-sprint-number"
+    SPRINT_NUM_FILE="/tmp/${PROJECT_PREFIX}-sprint-number"
     CURRENT_SPRINT_NUM=$(cat "$SPRINT_NUM_FILE" 2>/dev/null || echo "1")
 
     # Sum delivered person-days from completed tickets
@@ -391,8 +391,8 @@ fi
 
 # ─── 9. Auto-trigger triage when tickets need review ─────────────────────────
 log_info "Check 9: Blocked tickets needing triage..."
-TRIAGE_REVIEWED_FILE="/tmp/bisb-triage-reviewed-tickets"
-TRIAGE_COOLDOWN_FILE="/tmp/bisb-triage-cooldown"
+TRIAGE_REVIEWED_FILE="/tmp/${PROJECT_PREFIX}-triage-reviewed-tickets"
+TRIAGE_COOLDOWN_FILE="/tmp/${PROJECT_PREFIX}-triage-cooldown"
 
 # Cooldown: max 1 auto-triage per 2 hours
 TRIAGE_COOLDOWN=false
@@ -465,7 +465,7 @@ fi
 # ─── 10. Report ──────────────────────────────────────────────────────────────
 if [[ -n "$ALERTS" ]]; then
   # Hourly flag to avoid spamming the same alerts every 15 min
-  FLAG_FILE="/tmp/bisb-omar-alert-$(date +%Y-%m-%d-%H)"
+  FLAG_FILE="/tmp/${PROJECT_PREFIX}-omar-alert-$(date +%Y-%m-%d-%H)"
   if [[ ! -f "$FLAG_FILE" ]]; then
     slack_notify "**Rapport santé pipeline** — $(date +"%H:%M")\n\n${ALERTS}" "pipeline" "warning"
     touch "$FLAG_FILE"
@@ -478,7 +478,7 @@ else
 fi
 
 # ─── 11. Generate Dashboard (daily) ─────────────────────────────────────────
-DASHBOARD_FLAG="/tmp/bisb-dashboard-$(date +%Y-%m-%d)"
+DASHBOARD_FLAG="/tmp/${PROJECT_PREFIX}-dashboard-$(date +%Y-%m-%d)"
 if [[ ! -f "$DASHBOARD_FLAG" ]]; then
   log_info "Generating daily dashboard..."
   DASHBOARD_DIR="/var/www/bisb-dashboard"
@@ -553,7 +553,7 @@ print(f'{action} on {ticket} ({time_str})')
 
   # Stuck tickets
   STUCK_ROWS=""
-  for f in /tmp/bisb-retries/BISB-*; do
+  for f in /tmp/${PROJECT_PREFIX}-retries/BISB-*; do
     [[ -f "$f" ]] || continue
     cnt=$(cat "$f" 2>/dev/null || echo 0)
     if [[ "$cnt" -ge 2 ]]; then

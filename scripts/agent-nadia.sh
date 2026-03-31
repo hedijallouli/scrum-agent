@@ -552,7 +552,7 @@ echo "$CLAUDE_OUTPUT" >> "$LOG_FILE"
 log_info "Parsing verdict..."
 
 # Write output to temp file for reliable parsing
-AGENT_TMPFILE=$(mktemp /tmp/bisb-agent-XXXXXX.txt)
+AGENT_TMPFILE=$(mktemp /tmp/${PROJECT_PREFIX}-agent-XXXXXX.txt)
 printf '%s\n' "$CLAUDE_OUTPUT" > "$AGENT_TMPFILE"
 VERDICT=$(parse_verdict "$AGENT_TMPFILE")
 rm -f "$AGENT_TMPFILE"

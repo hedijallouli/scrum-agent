@@ -259,7 +259,7 @@ Claude returned empty output. Will retry on next cycle."
     exit 1
   fi
 
-  AGENT_TMPFILE=$(mktemp /tmp/bisb-agent-XXXXXX.txt)
+  AGENT_TMPFILE=$(mktemp /tmp/${PROJECT_PREFIX}-agent-XXXXXX.txt)
   printf '%s\n' "$CLAUDE_OUTPUT" > "$AGENT_TMPFILE"
   VERDICT=$(parse_verdict "$AGENT_TMPFILE")
   rm -f "$AGENT_TMPFILE"
@@ -567,7 +567,7 @@ PR #${PR_NUMBER} not yet mergeable (status: ${MERGE_STATUS}). Waiting for checks
   cd "$PROJECT_DIR" && git worktree prune 2>/dev/null || true
 
   # ─── Global merge lock: serialize merges to prevent orphaned commits ─────
-  MERGE_LOCK="/tmp/bisb-merge-master.lock"
+  MERGE_LOCK="/tmp/${PROJECT_PREFIX}-merge-master.lock"
   MERGE_LOCK_ACQUIRED=false
   for _attempt in $(seq 1 12); do
     if [[ ! -f "$MERGE_LOCK" ]]; then

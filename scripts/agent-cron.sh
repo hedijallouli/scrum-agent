@@ -13,14 +13,15 @@ for arg in "$@"; do
   [[ "$arg" == "--force" ]] && FORCE_RUN=true
 done
 
-# Prevent overlapping dispatcher runs
-CRON_LOCKFILE="/tmp/bisb-agent-cron.lock"
-exec 200>"$CRON_LOCKFILE"
-flock -n 200 || { echo "[$(date)] Previous dispatcher still running, skipping this cycle."; exit 0; }
-
 AGENT_NAME="dispatcher"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/agent-common.sh"
+
+# Prevent overlapping dispatcher runs (after agent-common.sh sets PROJECT_PREFIX)
+CRON_LOCKFILE="/tmp/${PROJECT_PREFIX}-agent-cron.lock"
+exec 200>"$CRON_LOCKFILE"
+flock -n 200 || { echo "[$(date)] Previous dispatcher still running, skipping this cycle."; exit 0; }
+
 init_log "$AGENT_NAME" "cron"
 
 log_info "=== ${PROJECT_KEY} agent cron starting ==="
@@ -57,12 +58,12 @@ fi
 cd "$PROJECT_DIR" && git checkout "${BASE_BRANCH}" -q 2>/dev/null || git checkout -B "${BASE_BRANCH}" "origin/${BASE_BRANCH}" -q 2>/dev/null || true
 
 # ─── Pause check ────────────────────────────────────────────────────────────
-PAUSE_FLAG="/tmp/bisb-agents-paused"
+PAUSE_FLAG="/tmp/${PROJECT_PREFIX}-agents-paused"
 if [[ -f "$PAUSE_FLAG" ]]; then
   log_info "Agents paused (flag exists). Checking if ceremony needed..."
   # Even when paused, check if we need to run sprint ceremony
   # (ceremony creates new sprint and removes pause flag)
-    CEREMONY_FLAG="/tmp/bisb-ceremony-done-$(date -u +%Y%m%d)"
+    CEREMONY_FLAG="/tmp/${PROJECT_PREFIX}-ceremony-done-$(date -u +%Y%m%d)"
     if [[ ! -f "$CEREMONY_FLAG" ]]; then
       log_info "Agents paused but ceremony not done today — falling through to ceremony check..."
       # Don't exit — fall through to ceremony check defined later in the script
@@ -86,7 +87,7 @@ if [[ "$SCRIPT_HASH_BEFORE" != "$SCRIPT_HASH_AFTER" ]]; then
 fi
 
 # ─── Safety: Max 2 sprints per week ─────────────────────────────────────────
-SPRINT_WEEK_FILE="/tmp/bisb-sprints-this-week-$(date -u +%Y-W%V)"
+SPRINT_WEEK_FILE="/tmp/${PROJECT_PREFIX}-sprints-this-week-$(date -u +%Y-W%V)"
 SPRINTS_THIS_WEEK=$(cat "$SPRINT_WEEK_FILE" 2>/dev/null || echo 0)
 MAX_SPRINTS_PER_WEEK=2
 
@@ -98,7 +99,7 @@ check_hedi_messages() {
   [[ -z "$CHANNEL_ID" ]] && return 0
   [[ -z "${SLACK_BOT_TOKEN:-}" ]] && return 0
 
-  local LAST_CHECK_FILE="/tmp/bisb-hedi-lastcheck"
+  local LAST_CHECK_FILE="/tmp/${PROJECT_PREFIX}-hedi-lastcheck"
   local OLDEST
   OLDEST=$(cat "$LAST_CHECK_FILE" 2>/dev/null || echo "0")
 
@@ -113,7 +114,7 @@ data = json.load(sys.stdin)
 if not data.get('ok'):
     sys.exit(0)
 
-msg_dir = '/tmp/bisb-hedi-messages'
+msg_dir = '/tmp/${PROJECT_PREFIX}-hedi-messages'
 os.makedirs(msg_dir, exist_ok=True)
 valid_agents = ['salma', 'youssef', 'nadia', 'omar', 'layla', 'rami']
 latest_ts = '0'
@@ -129,7 +130,7 @@ for msg in data.get('messages', []):
     # Check for pause/stop command  
     text_lower = text.lower()
     if any(cmd in text_lower for cmd in ['pause', 'stop', 'arreter']):
-        open('/tmp/bisb-agents-paused', 'w').write('Paused by Hedi via Slack')
+        open('/tmp/${PROJECT_PREFIX}-agents-paused', 'w').write('Paused by Hedi via Slack')
         print('PAUSE_REQUESTED', file=sys.stderr)
 
     agent = None
@@ -194,7 +195,7 @@ if (( DAILY_CALLS >= BUDGET_LIMIT )); then
   BUDGET_MODE="stopped"
   log_info "Budget HARD STOP: ${DAILY_CALLS} calls today (limit: ${BUDGET_LIMIT}). Only Omar health checks will run."
   # Post alert once per hour
-  BUDGET_ALERT_FLAG="/tmp/bisb-budget-alert-$(date -u +%Y-%m-%d-%H)"
+  BUDGET_ALERT_FLAG="/tmp/${PROJECT_PREFIX}-budget-alert-$(date -u +%Y-%m-%d-%H)"
   if [[ ! -f "$BUDGET_ALERT_FLAG" ]]; then
     slack_notify "Budget HARD STOP: ${DAILY_CALLS} API calls today. Only health checks running. Agents resume tomorrow." "alerts" "danger"
     touch "$BUDGET_ALERT_FLAG"
@@ -202,7 +203,7 @@ if (( DAILY_CALLS >= BUDGET_LIMIT )); then
 elif (( DAILY_CALLS >= BUDGET_THROTTLE )); then
   BUDGET_MODE="throttled"
   log_info "Budget THROTTLED: ${DAILY_CALLS} calls today (limit: ${BUDGET_THROTTLE}). Only Rami (merges) + Omar running."
-  BUDGET_ALERT_FLAG="/tmp/bisb-budget-throttle-$(date -u +%Y-%m-%d-%H)"
+  BUDGET_ALERT_FLAG="/tmp/${PROJECT_PREFIX}-budget-throttle-$(date -u +%Y-%m-%d-%H)"
   if [[ ! -f "$BUDGET_ALERT_FLAG" ]]; then
     slack_notify "Budget throttled: ${DAILY_CALLS} API calls. Only merge + health check agents active." "alerts" "warning"
     touch "$BUDGET_ALERT_FLAG"
@@ -227,12 +228,12 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════
 check_needs_human_escalation() {
   [[ "${TRACKER_BACKEND:-jira}" != "plane" ]] && return
-  local NOTIFY_DIR="/tmp/bisb-needs-human-notified"
+  local NOTIFY_DIR="/tmp/${PROJECT_PREFIX}-needs-human-notified"
   mkdir -p "$NOTIFY_DIR"
 
   # Get all active needs-human tickets from Plane (temp file to avoid heredoc-in-$() issues)
   local _nh_script
-  _nh_script=$(mktemp /tmp/bisb-nh-XXXXXX.py)
+  _nh_script=$(mktemp /tmp/${PROJECT_PREFIX}-nh-XXXXXX.py)
   cat > "$_nh_script" << 'NHPYEOF'
 import os, requests
 HEDI_ID = "635b2c8a-9532-49f8-8562-1fd182e09cd1"
@@ -277,8 +278,8 @@ NHPYEOF
 
     # Read last feedback for context
     local feedback_snippet=""
-    if [[ -f "/tmp/bisb-feedback/${ticket_key}.txt" ]]; then
-      feedback_snippet=$(tail -8 "/tmp/bisb-feedback/${ticket_key}.txt" 2>/dev/null | head -c 600)
+    if [[ -f "/tmp/${PROJECT_PREFIX}-feedback/${ticket_key}.txt" ]]; then
+      feedback_snippet=$(tail -8 "/tmp/${PROJECT_PREFIX}-feedback/${ticket_key}.txt" 2>/dev/null | head -c 600)
     fi
 
     log_info "Escalating needs-human ticket: ${ticket_key} — assigned to Hedi in Plane"
@@ -487,14 +488,14 @@ PYEOF
             fi
 
             # Trigger triage (with 1h cooldown)
-            TRIAGE_COOLDOWN_FILE="/tmp/bisb-triage-cooldown-cron"
+            TRIAGE_COOLDOWN_FILE="/tmp/${PROJECT_PREFIX}-triage-cooldown-cron"
             TRIAGE_COOLDOWN_AGE=0
             if [[ -f "$TRIAGE_COOLDOWN_FILE" ]]; then
               TRIAGE_COOLDOWN_AGE=$(( $(date +%s) - $(stat -c %Y "$TRIAGE_COOLDOWN_FILE" 2>/dev/null || echo 0) ))
             fi
             if [[ "$should_triage" == "true" ]]; then
               if (( TRIAGE_COOLDOWN_AGE > 3600 )) || [[ ! -f "$TRIAGE_COOLDOWN_FILE" ]]; then
-                "${SCRIPT_DIR}/ceremony-blocker-triage.sh" >> /var/log/bisb/blocker-triage.log 2>&1 &
+                "${SCRIPT_DIR}/ceremony-blocker-triage.sh" >> ${LOG_DIR}/blocker-triage.log 2>&1 &
                 touch "$TRIAGE_COOLDOWN_FILE"
                 log_info "Blocker triage ceremony triggered for: ${blocked_tickets}"
                 slack_notify "omar" "🚨 **Blocker Triage déclenchée** (${blocked_count} bloqués / ${active_count} actifs)\nTickets : **${blocked_tickets}**\nTable ronde en cours — décision : split / pivot / déblocage / escalade humain." "pipeline" "warning" 2>/dev/null || true
@@ -538,15 +539,15 @@ PYEOF
 
 # ─── WIP Counter ─────────────────────────────────────────────────────────────
 # Count currently-running agent jobs by counting their non-stale lock files.
-# For per-ticket agents (youssef, nadia, rami): LOCK_FILE = /tmp/bisb-agent-AGENT-TICKET.lock
-# For single-lock agents (salma, layla, omar): LOCK_FILE = /tmp/bisb-agent-AGENT.lock
+# For per-ticket agents (youssef, nadia, rami): LOCK_FILE = /tmp/${PROJECT_PREFIX}-agent-AGENT-TICKET.lock
+# For single-lock agents (salma, layla, omar): LOCK_FILE = /tmp/${PROJECT_PREFIX}-agent-AGENT.lock
 count_active_wip() {
   local agent="$1"
   local max_age=1800  # 30 min (matches LOCK_MAX_AGE in agent-common.sh)
   local count=0
   local now
   now=$(date +%s)
-  for lf in /tmp/bisb-agent-${agent}-BISB-*.lock /tmp/bisb-agent-${agent}-${PROJECT_KEY}-*.lock; do
+  for lf in /tmp/${PROJECT_PREFIX}-agent-${agent}-BISB-*.lock /tmp/${PROJECT_PREFIX}-agent-${agent}-${PROJECT_KEY}-*.lock; do
     [[ -f "$lf" ]] || continue
     local mtime
     mtime=$(stat -c %Y "$lf" 2>/dev/null || stat -f %m "$lf" 2>/dev/null || echo 0)
@@ -584,8 +585,8 @@ else
   process_agent "nadia" 3
 
   # Layla (Product) — WIP limit: max 1 ticket (single-lock agent)
-  if [[ -f "/tmp/bisb-agent-layla.lock" ]]; then
-    LAYLA_LOCK_AGE=$(( $(date +%s) - $(stat -c %Y /tmp/bisb-agent-layla.lock 2>/dev/null || echo 0) ))
+  if [[ -f "/tmp/${PROJECT_PREFIX}-agent-layla.lock" ]]; then
+    LAYLA_LOCK_AGE=$(( $(date +%s) - $(stat -c %Y /tmp/${PROJECT_PREFIX}-agent-layla.lock 2>/dev/null || echo 0) ))
     if (( LAYLA_LOCK_AGE < 1800 )); then
       log_info "WIP limit: Layla already running (lock age ${LAYLA_LOCK_AGE}s) — skipping dispatch"
     else
@@ -603,7 +604,7 @@ else
   AGENT_PIDS+=($!)
 
   # ─── Layla Daily Report (once per day) ─────────────────────────────────
-  DAILY_FLAG="/tmp/bisb-layla-daily-$(date -u +%Y-%m-%d)"
+  DAILY_FLAG="/tmp/${PROJECT_PREFIX}-layla-daily-$(date -u +%Y-%m-%d)"
   if [[ ! -f "$DAILY_FLAG" ]]; then
     log_info "Running Layla daily report..."
     "${SCRIPT_DIR}/agent-layla-daily.sh" &
@@ -612,7 +613,7 @@ else
 
   # ─── Layla Weekly Report (Monday only) ─────────────────────────────────
   DAY_OF_WEEK=$(date -u +%u)  # 1=Monday
-  WEEKLY_FLAG="/tmp/bisb-layla-weekly-$(date -u +%Y-W%V)"
+  WEEKLY_FLAG="/tmp/${PROJECT_PREFIX}-layla-weekly-$(date -u +%Y-W%V)"
   if [[ "$DAY_OF_WEEK" == "1" ]] && [[ ! -f "$WEEKLY_FLAG" ]]; then
     log_info "Running Layla weekly report (Monday)..."
     "${SCRIPT_DIR}/agent-layla-weekly.sh" &
@@ -636,7 +637,7 @@ log_info "All agents complete. Failures: $FAILURES/${#ALL_PIDS[@]}"
 run_sprint_ceremony_if_needed() {
   # Runs ceremony-review.sh + ceremony-retro.sh when all In Progress tickets are done (Plane-based).
   # Sprint transition (close/open) is handled manually via n8n webhook.
-  local CEREMONY_FLAG="/tmp/bisb-ceremony-done-$(date -u +%Y%m%d)"
+  local CEREMONY_FLAG="/tmp/${PROJECT_PREFIX}-ceremony-done-$(date -u +%Y%m%d)"
   if [[ -f "$CEREMONY_FLAG" ]]; then
     log_info "Sprint ceremony already ran today"
     return
@@ -645,7 +646,7 @@ run_sprint_ceremony_if_needed() {
   # Count Plane tickets still in started/unstarted states
   local REMAINING=99
   local _tmp_plane
-  _tmp_plane=$(mktemp /tmp/bisb-plane-check-XXXXXX.py)
+  _tmp_plane=$(mktemp /tmp/${PROJECT_PREFIX}-plane-check-XXXXXX.py)
   cat > "$_tmp_plane" << 'PLANE_PYEOF'
 import os, sys, requests
 base = os.environ.get('PLANE_BASE_URL', '').rstrip('/')
@@ -677,7 +678,7 @@ PLANE_PYEOF
 
   # Safety: max 2 ceremonies per week
   local CEREMONY_WEEK_COUNT
-  CEREMONY_WEEK_COUNT=$(find /tmp -maxdepth 1 -name "bisb-ceremony-done-*" -mtime -7 2>/dev/null | wc -l || echo 0)
+  CEREMONY_WEEK_COUNT=$(find /tmp -maxdepth 1 -name "${PROJECT_PREFIX}-ceremony-done-*" -mtime -7 2>/dev/null | wc -l || echo 0)
   if [[ "$CEREMONY_WEEK_COUNT" -ge "${MAX_SPRINTS_PER_WEEK:-2}" ]]; then
     log_info "Max sprint ceremonies this week reached. Skipping."
     return
@@ -709,7 +710,7 @@ trigger_planning_if_new_sprint() {
   # Only relevant for Plane backend (Jira uses sprint labels, no cycle UUID)
   [[ "${TRACKER_BACKEND:-jira}" != "plane" ]] && return
 
-  local LAST_CYCLE_FILE="/tmp/bisb-last-cycle-id"
+  local LAST_CYCLE_FILE="/tmp/${PROJECT_PREFIX}-last-cycle-id"
 
   # Fetch the current active Plane cycle ID
   local CURRENT_CYCLE
@@ -758,7 +759,7 @@ PYEOF
   log_info "New sprint detected (${LAST_CYCLE} → ${CURRENT_CYCLE}) — triggering planning ceremony"
 
   # Idempotency: don't re-plan the same sprint if the cron ran twice in quick succession
-  local PLANNING_FLAG="/tmp/bisb-planning-done-${CURRENT_CYCLE}"
+  local PLANNING_FLAG="/tmp/${PROJECT_PREFIX}-planning-done-${CURRENT_CYCLE}"
   if [[ -f "$PLANNING_FLAG" ]]; then
     log_info "Planning already ran for cycle ${CURRENT_CYCLE} — skipping"
     return
@@ -766,7 +767,7 @@ PYEOF
   touch "$PLANNING_FLAG"
 
   slack_notify "omar" "Nouveau sprint detecte (${CURRENT_CYCLE:0:8}...) — lancement du Sprint Planning !" "sprint"
-  nohup bash "${SCRIPT_DIR}/ceremony-planning.sh" >> /var/log/bisb/planning.log 2>&1 &
+  nohup bash "${SCRIPT_DIR}/ceremony-planning.sh" >> ${LOG_DIR}/planning.log 2>&1 &
   log_info "Planning ceremony launched in background (PID=$!)"
 }
 
@@ -776,13 +777,13 @@ trigger_planning_if_new_sprint
 # PHASE 6: Backlog Health Check (daily)
 # ═══════════════════════════════════════════════════════════════════════════
 check_backlog_health() {
-  local HEALTH_FLAG="/tmp/bisb-backlog-check-$(date -u +%Y-%m-%d)"
+  local HEALTH_FLAG="/tmp/${PROJECT_PREFIX}-backlog-check-$(date -u +%Y-%m-%d)"
   [[ -f "$HEALTH_FLAG" ]] && return
 
   # Count Plane backlog tickets (Todo/Backlog state, not in 'Blocked' state)
   local BACKLOG_COUNT
   local _tmp_bl
-  _tmp_bl=$(mktemp /tmp/bisb-backlog-XXXXXX.py)
+  _tmp_bl=$(mktemp /tmp/${PROJECT_PREFIX}-backlog-XXXXXX.py)
   cat > "$_tmp_bl" << 'PLANE_PYEOF'
 import os, requests, json
 base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
@@ -830,7 +831,7 @@ check_backlog_health
 build_and_deploy_test() {
   # Safety: ensure we are on base branch before building
   cd "$PROJECT_DIR" && git checkout "${BASE_BRANCH}" -q 2>/dev/null || true
-  local LAST_BUILD_HASH="/tmp/bisb-last-build-hash"
+  local LAST_BUILD_HASH="/tmp/${PROJECT_PREFIX}-last-build-hash"
   local CURRENT_HASH
   CURRENT_HASH=$(cd "$PROJECT_DIR" && git rev-parse HEAD 2>/dev/null || echo "")
   local PREVIOUS_HASH
@@ -868,7 +869,7 @@ generate_cycle_summary() {
 
   # Build stuck ticket list
   local STUCK_TICKETS=""
-  for retry_file in /tmp/bisb-retries/${PROJECT_KEY}-*; do
+  for retry_file in /tmp/${PROJECT_PREFIX}-retries/${PROJECT_KEY}-*; do
     [[ -f "$retry_file" ]] || continue
     local count
     count=$(cat "$retry_file" 2>/dev/null || echo 0)
@@ -881,7 +882,7 @@ generate_cycle_summary() {
   local LOG_SNIPPETS=""
   local cutoff
   cutoff=$(date -u -d '20 minutes ago' +%s 2>/dev/null || date -u -v-20M +%s 2>/dev/null || echo 0)
-  for lf in /var/log/bisb/BISB-*-*.log; do
+  for lf in ${LOG_DIR}/BISB-*-*.log; do
     [[ -f "$lf" ]] || continue
     local mtime
     mtime=$(stat -c %Y "$lf" 2>/dev/null || stat -f %m "$lf" 2>/dev/null || echo 0)
@@ -927,7 +928,7 @@ generate_cycle_summary
 # PHASE 9: Daily Health Digest (once per day)
 # ═══════════════════════════════════════════════════════════════════════════
 daily_health_digest() {
-  local DIGEST_FLAG="/tmp/bisb-daily-digest-$(date -u +%Y-%m-%d)"
+  local DIGEST_FLAG="/tmp/${PROJECT_PREFIX}-daily-digest-$(date -u +%Y-%m-%d)"
   [[ -f "$DIGEST_FLAG" ]] && return
   
   # Only run at ~08:00 UTC (first cycle of the workday)
@@ -945,7 +946,7 @@ daily_health_digest() {
   BLOCKED_COUNT=$(echo "$BLOCKED_COUNT" | tr -d ' ')
   
   local ERROR_COUNT
-  ERROR_COUNT=$(grep -c "ERROR\|FAIL" /var/log/bisb/cron.log 2>/dev/null || echo 0)
+  ERROR_COUNT=$(grep -c "ERROR\|FAIL" ${LOG_DIR}/cron.log 2>/dev/null || echo 0)
   
   local PCT=0
   if [[ "$TOTAL_COUNT" -gt 0 ]]; then

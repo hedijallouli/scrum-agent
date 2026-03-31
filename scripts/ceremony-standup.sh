@@ -17,7 +17,7 @@
 # Total runtime: ~8–10 minutes.
 #
 # Triggered: daily 08:30 UTC (09:30 Tunis) weekdays via cron
-# Log: /var/log/bisb/standup.log
+# Log: ${LOG_DIR}/standup.log
 # =============================================================================
 set -euo pipefail
 
@@ -32,12 +32,12 @@ load_env
 source "${SCRIPT_DIR}/tracker-common.sh"
 source "${SCRIPT_DIR}/ceremony-common.sh"
 
-LOG_FILE="/var/log/bisb/standup.log"
-mkdir -p /var/log/bisb
+LOG_FILE="${LOG_DIR}/standup.log"
+mkdir -p ${LOG_DIR}
 log_info "=== BisB Ceremony Standup starting ==="
 
 # ─── Idempotency guard ────────────────────────────────────────────────────────
-STANDUP_FLAG="/tmp/bisb-standup-$(date +%Y-%m-%d)"
+STANDUP_FLAG="/tmp/${PROJECT_PREFIX}-standup-$(date +%Y-%m-%d)"
 if [[ -f "$STANDUP_FLAG" ]]; then
   log_info "Standup already ran today. Exiting."
   exit 0
@@ -71,7 +71,7 @@ TEAM_VELOCITY=$(get_velocity       2>/dev/null || echo "${VELOCITY}%")
 STUCK=0
 STUCK_LIST=""
 STUCK_TICKETS_FOR_SALMA=""
-for f in /tmp/bisb-retries/${PROJECT_KEY:?}-*; do
+for f in /tmp/${PROJECT_PREFIX}-retries/${PROJECT_KEY:?}-*; do
   [[ -f "$f" ]] || continue
   cnt=$(cat "$f" 2>/dev/null || echo 0)
   if [[ "$cnt" -ge 2 ]]; then
@@ -84,11 +84,11 @@ done
 
 # ─── 4. Blacklisted tickets ───────────────────────────────────────────────────
 BLACKLISTED_LIST=""
-if [[ -f "${BLACKLIST_FILE:-/tmp/bisb-dispatch-blacklist}" ]]; then
+if [[ -f "${BLACKLIST_FILE:-/tmp/${PROJECT_PREFIX}-dispatch-blacklist}" ]]; then
   while IFS='|' read -r t ts reason; do
     [[ -z "$t" ]] && continue
     BLACKLISTED_LIST="${BLACKLISTED_LIST}  - ${t}: ${reason}\n"
-  done < "${BLACKLIST_FILE:-/tmp/bisb-dispatch-blacklist}"
+  done < "${BLACKLIST_FILE:-/tmp/${PROJECT_PREFIX}-dispatch-blacklist}"
 fi
 
 # ─── 5. Health indicator ──────────────────────────────────────────────────────

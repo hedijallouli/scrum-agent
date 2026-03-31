@@ -14,7 +14,7 @@
 #   - Proactive DM support (called by agents on failure/triage)
 #
 # Usage: agent-dm-handler.sh <agent_name> <message_text> <sender_username>
-# Log:   /var/log/bisb/dm-handler-<agent>-<date>.log
+# Log:   ${LOG_DIR}/dm-handler-<agent>-<date>.log
 # =============================================================================
 set -euo pipefail
 
@@ -29,8 +29,8 @@ source "${SCRIPT_DIR}/agent-common.sh"
 load_env
 source "${SCRIPT_DIR}/tracker-common.sh"
 
-LOG_FILE="/var/log/bisb/dm-handler-${AGENT_NAME}-$(date +%Y-%m-%d).log"
-mkdir -p /var/log/bisb
+LOG_FILE="${LOG_DIR}/dm-handler-${AGENT_NAME}-$(date +%Y-%m-%d).log"
+mkdir -p ${LOG_DIR}
 log_info "=== DM Handler v2: ${AGENT_NAME} ← ${SENDER_USERNAME} ==="
 log_info "Message: ${MESSAGE_TEXT:0:120}..."
 
@@ -244,7 +244,7 @@ import re
 
 # Count retry files (stuck tickets)
 import glob
-retries = glob.glob('/tmp/bisb-retries/BISB-*')
+retries = glob.glob('/tmp/${PROJECT_PREFIX}-retries/BISB-*')
 counts = []
 for f in retries:
     try:
@@ -258,7 +258,7 @@ total_retries = len(retries)
 # Read recent activity
 activity = ''
 try:
-    activity = open('/var/log/bisb/activity.log').read()
+    activity = open('${LOG_DIR}/activity.log').read()
     # Count successes in last 50 lines
     recent = activity.split('\n')[-50:]
     successes = sum(1 for l in recent if 'SUCCESS' in l or 'COMPLETE' in l)
@@ -407,15 +407,15 @@ if [[ "$IS_CONFIRMATION" == "true" && -n "$PENDING_ACTION" ]]; then
       ;;
     start_cron)
       # Kill any existing loop first (avoid duplicate)
-      LOOP_PID_FILE="/tmp/bisb-omar-loop.pid"
+      LOOP_PID_FILE="/tmp/${PROJECT_PREFIX}-omar-loop.pid"
       if [[ -f "$LOOP_PID_FILE" ]]; then
         OLD_PID=$(cat "$LOOP_PID_FILE" 2>/dev/null || echo "")
         [[ -n "$OLD_PID" ]] && kill "$OLD_PID" 2>/dev/null || true
-        rm -f "$LOOP_PID_FILE" /tmp/bisb-omar-loop.stop
+        rm -f "$LOOP_PID_FILE" /tmp/${PROJECT_PREFIX}-omar-loop.stop
       fi
       # Parse optional cycle count from stored action (e.g. "start_cron|12|")
       LOOP_CYCLES="${ACTION_CYCLES:-0}"
-      LOOP_LOG="/var/log/bisb/omar-force-loop-$(date +%Y-%m-%d).log"
+      LOOP_LOG="${LOG_DIR}/omar-force-loop-$(date +%Y-%m-%d).log"
       nohup "${SCRIPT_DIR}/agent-cron-loop.sh" "$LOOP_CYCLES" >> "$LOOP_LOG" 2>&1 &
       LOOP_PID=$!
       log_info "Force loop started (PID=${LOOP_PID}, cycles=${LOOP_CYCLES:-unlimited})"
@@ -428,13 +428,13 @@ if [[ "$IS_CONFIRMATION" == "true" && -n "$PENDING_ACTION" ]]; then
       ;;
     pause_cron)
       # Stop the force-loop if running
-      touch /tmp/bisb-omar-loop.stop
+      touch /tmp/${PROJECT_PREFIX}-omar-loop.stop
       # Also pause normal work-hours cron
-      touch /tmp/bisb-agents-paused
+      touch /tmp/${PROJECT_PREFIX}-agents-paused
       ACTION_RESULT="⏸️ Loop stoppé + agents mis en pause. Le pipeline est au repos."
       ;;
     resume_cron)
-      rm -f /tmp/bisb-agents-paused /tmp/bisb-omar-loop.stop
+      rm -f /tmp/${PROJECT_PREFIX}-agents-paused /tmp/${PROJECT_PREFIX}-omar-loop.stop
       ACTION_RESULT="▶️ Agents réactivés. Le cron reprend normalement aux heures de travail."
       ;;
   esac
@@ -459,24 +459,24 @@ elif [[ "$ACTION_INTENT" =~ ^(run_retro|run_planning|run_standup|run_refinement|
   # Ceremony triggers — execute immediately, no confirmation needed
   case "$ACTION_INTENT" in
     run_retro)
-      nohup "${SCRIPT_DIR}/ceremony-retro.sh" >> "/var/log/bisb/ceremony-retro-manual.log" 2>&1 &
+      nohup "${SCRIPT_DIR}/ceremony-retro.sh" >> "${LOG_DIR}/ceremony-retro-manual.log" 2>&1 &
       ACTION_RESULT="🔄 Retrospective lancee — l'equipe va poster dans #sprint dans quelques instants."
       ;;
     run_planning)
-      nohup "${SCRIPT_DIR}/ceremony-planning.sh" >> "/var/log/bisb/planning.log" 2>&1 &
+      nohup "${SCRIPT_DIR}/ceremony-planning.sh" >> "${LOG_DIR}/planning.log" 2>&1 &
       ACTION_RESULT="🚀 Sprint Planning lance — Salma va ouvrir le fil dans #sprint."
       ;;
     run_standup)
-      rm -f "/tmp/bisb-standup-$(date +%Y-%m-%d)" "/tmp/bisb-standup-cooldown"
-      nohup "${SCRIPT_DIR}/ceremony-standup.sh" >> "/var/log/bisb/standup.log" 2>&1 &
+      rm -f "/tmp/${PROJECT_PREFIX}-standup-$(date +%Y-%m-%d)" "/tmp/${PROJECT_PREFIX}-standup-cooldown"
+      nohup "${SCRIPT_DIR}/ceremony-standup.sh" >> "${LOG_DIR}/standup.log" 2>&1 &
       ACTION_RESULT="☀️ Standup lance — tour de table dans #standup dans quelques instants."
       ;;
     run_refinement)
-      nohup "${SCRIPT_DIR}/ceremony-refinement.sh" >> "/var/log/bisb/refinement.log" 2>&1 &
+      nohup "${SCRIPT_DIR}/ceremony-refinement.sh" >> "${LOG_DIR}/refinement.log" 2>&1 &
       ACTION_RESULT="📋 Refinement lance — Salma va affiner le backlog dans #standup."
       ;;
     run_review)
-      nohup "${SCRIPT_DIR}/ceremony-review.sh" >> "/var/log/bisb/ceremony-review.log" 2>&1 &
+      nohup "${SCRIPT_DIR}/ceremony-review.sh" >> "${LOG_DIR}/ceremony-review.log" 2>&1 &
       ACTION_RESULT="🏁 Sprint Review lancee — l'equipe presente ses livraisons dans #sprint."
       ;;
   esac
@@ -652,8 +652,8 @@ history.append({'ts': ts, 'message': message, 'sender': sender})
 json.dump({'agent':agent,'ticket':ticket,'latest_instruction':message,'sender':sender,'timestamp':ts,'history':history[-10:]},
           open(out_file,'w'), indent=2, ensure_ascii=False)
 PYEOF
-  mkdir -p "${FEEDBACK_DIR:-/tmp/bisb-feedback}"
-  echo "- [DM de ${SENDER_USERNAME}]: ${MESSAGE_TEXT}" >> "${FEEDBACK_DIR:-/tmp/bisb-feedback}/${TICKET_FOR_INSTRUCTIONS}.txt"
+  mkdir -p "${FEEDBACK_DIR:-/tmp/${PROJECT_PREFIX}-feedback}"
+  echo "- [DM de ${SENDER_USERNAME}]: ${MESSAGE_TEXT}" >> "${FEEDBACK_DIR:-/tmp/${PROJECT_PREFIX}-feedback}/${TICKET_FOR_INSTRUCTIONS}.txt"
 fi
 
 # ─── 9. Build the prompt ─────────────────────────────────────────────────────

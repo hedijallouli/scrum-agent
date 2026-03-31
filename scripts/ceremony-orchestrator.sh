@@ -11,7 +11,7 @@
 #   2. Sprint Retro   → wait for completion →
 #   3. Post summary to Slack/Mattermost
 #
-# State tracked in: /tmp/bisb-ceremony-state.json
+# State tracked in: /tmp/${PROJECT_PREFIX}-ceremony-state.json
 #
 # Usage:
 #   ceremony-orchestrator.sh              # Run Review then Retro
@@ -31,14 +31,14 @@ source "${SCRIPT_DIR}/agent-common.sh"
 load_env
 source "${SCRIPT_DIR}/ceremony-common.sh"
 
-LOG_FILE="/var/log/bisb/ceremony-orchestrator-$(date '+%Y-%m-%dT%H:%M:%S').log"
-mkdir -p /var/log/bisb
+LOG_FILE="${LOG_DIR}/ceremony-orchestrator-$(date '+%Y-%m-%dT%H:%M:%S').log"
+mkdir -p ${LOG_DIR}
 log_info "=== Ceremony Orchestrator Starting ==="
 
 MODE="${1:-full}"  # full, review-only, retro-only
 
 # ─── Lock: prevent duplicate ceremony runs ────────────────────────────────────
-ORCH_LOCK="/tmp/bisb-ceremony-orchestrator.lock"
+ORCH_LOCK="/tmp/${PROJECT_PREFIX}-ceremony-orchestrator.lock"
 ORCH_LOCK_MAX_AGE=7200  # 2 hours
 
 if [[ -f "$ORCH_LOCK" ]]; then
@@ -55,7 +55,7 @@ touch "$ORCH_LOCK"
 trap 'rm -f "$ORCH_LOCK"; ceremony_resume_agents' EXIT
 
 # ─── State file ───────────────────────────────────────────────────────────────
-STATE_FILE="/tmp/bisb-ceremony-state.json"
+STATE_FILE="/tmp/${PROJECT_PREFIX}-ceremony-state.json"
 
 update_state() {
   local phase="$1" status="$2"

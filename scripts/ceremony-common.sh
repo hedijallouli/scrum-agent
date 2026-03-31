@@ -243,8 +243,8 @@ RÈGLES ABSOLUES DE JEU DE RÔLE (ne jamais enfreindre) :
 
 # ─── ceremony_pause_agents / ceremony_resume_agents ───────────────────────
 # Prevent dispatch loop from interfering with ceremonies.
-# Sets/removes /tmp/bisb-agents-paused during ceremony execution.
-CEREMONY_PAUSE_FLAG="/tmp/bisb-agents-paused"
+# Sets/removes /tmp/${PROJECT_PREFIX}-agents-paused during ceremony execution.
+CEREMONY_PAUSE_FLAG="/tmp/${PROJECT_PREFIX}-agents-paused"
 CEREMONY_PAUSED_BY_US=""
 
 ceremony_pause_agents() {
@@ -444,7 +444,7 @@ PYEOF
 #
 # Priority:
 #   1. ${DATA_DIR}/agents/AGENT/last-activity.json  (shared memory file)
-#   2. Most recent /var/log/bisb/*-AGENT-*.log       (log fallback)
+#   2. Most recent ${LOG_DIR}/*-AGENT-*.log       (log fallback)
 #
 # Returns: one-line string, e.g. "completed BISB-49 (PR submitted) — il y a 2h"
 get_agent_activity() {
@@ -455,7 +455,7 @@ get_agent_activity() {
     local result
     # Use a temp script to avoid heredoc-inside-$() which fails on bash 3.2
     local _tmp_py
-    _tmp_py=$(mktemp /tmp/bisb-activity-XXXXXX.py)
+    _tmp_py=$(mktemp /tmp/${PROJECT_PREFIX}-activity-XXXXXX.py)
     cat > "$_tmp_py" <<'PYEOF'
 import json, sys, datetime
 path = sys.argv[1]
@@ -497,7 +497,7 @@ PYEOF
   fi
 
   # Fallback: last ticket reference from the most recent log for this agent
-  local log_dir="${LOG_DIR:-/var/log/bisb}"
+  local log_dir="${LOG_DIR:-${LOG_DIR}}"
   local latest_log
   latest_log=$(ls -t "${log_dir}"/*-${agent}-*.log 2>/dev/null | head -1 || true)
   if [[ -n "$latest_log" ]]; then

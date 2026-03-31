@@ -9,7 +9,7 @@
 #   en — English (for international communication / marketing)
 #   de — Deutsch (for German market / marketing purposes)
 #
-# This updates BISB_LANG in /etc/bisb/.env.agents and notifies the team.
+# This updates BISB_LANG in /etc/${PROJECT_PREFIX}/.env.agents and notifies the team.
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -17,7 +17,7 @@ source "${SCRIPT_DIR}/agent-common.sh" 2>/dev/null || true
 source "${SCRIPT_DIR}/tracker-common.sh" 2>/dev/null || true
 
 LANG_CODE="${1:-}"
-ENV_FILE="/etc/bisb/.env.agents"
+ENV_FILE="/etc/${PROJECT_PREFIX}/.env.agents"
 
 if [[ -z "$LANG_CODE" ]]; then
   echo "Usage: set-lang.sh [fr|en|de]"

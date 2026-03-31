@@ -20,7 +20,7 @@
 #   if dispatch_allowed "layla" "$level"; then ... fi
 # =============================================================================
 
-DEGRADE_FILE="/tmp/bisb-degrade-level"
+DEGRADE_FILE="/tmp/${PROJECT_PREFIX}-degrade-level"
 DEGRADE_HISTORY="/var/lib/bisb/data/degrade-history.jsonl"
 mkdir -p "$(dirname "$DEGRADE_HISTORY")" 2>/dev/null || true
 

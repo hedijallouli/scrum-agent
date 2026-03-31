@@ -20,8 +20,8 @@ AGENT_NAME="salma"
 source "${SCRIPT_DIR}/agent-common.sh"
 source "${SCRIPT_DIR}/ceremony-common.sh"
 
-LOG_FILE="/var/log/bisb/ceremony-refinement.log"
-mkdir -p /var/log/bisb
+LOG_FILE="${LOG_DIR}/ceremony-refinement.log"
+mkdir -p ${LOG_DIR}
 
 log_info "=== Backlog Refinement Ceremony Starting ==="
 

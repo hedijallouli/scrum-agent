@@ -22,8 +22,8 @@ load_env
 source "${SCRIPT_DIR}/tracker-common.sh"
 source "${SCRIPT_DIR}/ceremony-common.sh"
 
-LOG_FILE="/var/log/bisb/ceremony-review.log"
-mkdir -p /var/log/bisb
+LOG_FILE="${LOG_DIR}/ceremony-review.log"
+mkdir -p ${LOG_DIR}
 
 log_info "=== Sprint Review Ceremony Starting ==="
 

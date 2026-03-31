@@ -232,7 +232,7 @@ PYEOF
     # Extract sequence number from key (e.g. BISB-54 → 54)
     local seq_num="${key##*-}"
     # Cache per-run to avoid rate limits (valid for 5 min within same agent run)
-    local cache_file="/tmp/bisb-ticket-${key}.json"
+    local cache_file="/tmp/${PROJECT_PREFIX}-ticket-${key}.json"
     if [[ -f "$cache_file" ]] && (( $(date +%s) - $(date -r "$cache_file" +%s 2>/dev/null || echo 0) < 300 )); then
       cat "$cache_file"
       return 0
@@ -897,8 +897,8 @@ if [[ "$CHAT_BACKEND" == "mattermost" ]]; then
   }
 
   # ── Rich ticket link: "BISB-64 · Auction Confetti on winner" ──────────
-  # Fetches ticket title from Plane; caches in /tmp/bisb-ticket-cache/
-  _MM_TICKET_CACHE_DIR="/tmp/bisb-ticket-cache"
+  # Fetches ticket title from Plane; caches in /tmp/${PROJECT_PREFIX}-ticket-cache/
+  _MM_TICKET_CACHE_DIR="/tmp/${PROJECT_PREFIX}-ticket-cache"
   mkdir -p "$_MM_TICKET_CACHE_DIR" 2>/dev/null || true
 
   mm_ticket_link() {
@@ -954,10 +954,10 @@ PYPEOF
   }
 
   # ── Thread management: one root post per ticket ────────────────────────────
-  # Get the stored root post ID for a ticket (from /tmp/bisb-threads/)
+  # Get the stored root post ID for a ticket (from /tmp/${PROJECT_PREFIX}-threads/)
   mm_get_thread_root() {
     local ticket_key="$1"
-    local thread_file="/tmp/bisb-threads/${ticket_key}"
+    local thread_file="/tmp/${PROJECT_PREFIX}-threads/${ticket_key}"
     [[ -f "$thread_file" ]] && cat "$thread_file" || echo ""
   }
 
@@ -965,8 +965,8 @@ PYPEOF
   mm_set_thread_root() {
     local ticket_key="$1"
     local post_id="$2"
-    mkdir -p /tmp/bisb-threads
-    echo "$post_id" > "/tmp/bisb-threads/${ticket_key}"
+    mkdir -p /tmp/${PROJECT_PREFIX}-threads
+    echo "$post_id" > "/tmp/${PROJECT_PREFIX}-threads/${ticket_key}"
   }
 
   # Post a message, creating a thread root if none exists for this ticket

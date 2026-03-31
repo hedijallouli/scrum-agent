@@ -1,15 +1,27 @@
 #!/usr/bin/env bash
 # =============================================================================
-# agent-common.sh — Shared utilities for BisB AI agent pipeline
+# agent-common.sh — Shared utilities for scrum-agent pipeline
 # =============================================================================
 set -euo pipefail
 
 # Ensure tools are in PATH (claude, gh, npm may be in user-local dirs)
 export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 
-# Load environment
+# Load environment — detect project from parent directory or env override
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="/etc/bisb/.env.agents"
+# Auto-detect: if scripts live under /opt/<project>/scrum-agent/scripts/,
+# derive project key from the grandparent directory name
+if [[ -z "${PROJECT_PREFIX:-}" ]]; then
+  _parent="$(cd "${SCRIPT_DIR}/../.." 2>/dev/null && pwd)"
+  _dir_name="$(basename "$_parent")"
+  # Check if a project-specific env exists
+  if [[ -f "/etc/${_dir_name}/.env.agents" ]]; then
+    PROJECT_PREFIX="$_dir_name"
+  else
+    PROJECT_PREFIX="bisb"
+  fi
+fi
+ENV_FILE="${ENV_FILE:-/etc/${PROJECT_PREFIX}/.env.agents}"
 
 # ─── Source reliability modules ────────────────────────────────────────────────
 [[ -f "${SCRIPT_DIR}/event-log.sh" ]] && source "${SCRIPT_DIR}/event-log.sh"
@@ -29,7 +41,7 @@ load_env() {
 }
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
-LOG_DIR="/var/log/bisb"
+LOG_DIR="${LOG_DIR:-/var/log/${PROJECT_PREFIX}}"
 mkdir -p "$LOG_DIR"
 
 log_info() {
@@ -59,7 +71,7 @@ init_log() {
 # ─── Lock Management (per-agent) ─────────────────────────────────────────────
 # Each agent sets AGENT_NAME before sourcing this file for per-agent locks.
 # This allows Salma, Youssef, Nadia, and Rami to run in parallel.
-LOCK_FILE="/tmp/bisb-agent-${AGENT_NAME:-global}.lock"
+LOCK_FILE="/tmp/${PROJECT_PREFIX}-agent-${AGENT_NAME:-global}.lock"
 LOCK_MAX_AGE=1800  # 30 minutes
 
 acquire_lock() {
@@ -776,7 +788,7 @@ find_open_pr_between_branches() {
 }
 
 # ─── Retry Counter ────────────────────────────────────────────────────────────
-RETRY_DIR="/tmp/bisb-retries"
+RETRY_DIR="/tmp/${PROJECT_PREFIX}-retries"
 mkdir -p "$RETRY_DIR"
 
 get_retry_count() {
@@ -805,7 +817,7 @@ reset_retry() {
 # ─── Dispatch Blacklist ──────────────────────────────────────────────────────
 # Prevents re-dispatching tickets that have exceeded max retries.
 # Entries expire after BLACKLIST_COOLDOWN seconds (default 1 hour).
-BLACKLIST_FILE="/tmp/bisb-dispatch-blacklist"
+BLACKLIST_FILE="/tmp/${PROJECT_PREFIX}-dispatch-blacklist"
 BLACKLIST_COOLDOWN=3600  # 1 hour
 
 blacklist_ticket() {
@@ -832,7 +844,7 @@ clean_blacklist() {
   [[ ! -f "$BLACKLIST_FILE" ]] && return
   local now tmp
   now=$(date +%s)
-  tmp=$(mktemp /tmp/bisb-bl-clean-XXXXXX)
+  tmp=$(mktemp /tmp/${PROJECT_PREFIX}-bl-clean-XXXXXX)
   while IFS='|' read -r t ts reason; do
     [[ -z "$t" ]] && continue
     if (( now - ts < BLACKLIST_COOLDOWN )); then
@@ -846,7 +858,7 @@ remove_from_blacklist() {
   local ticket="$1"
   [[ ! -f "$BLACKLIST_FILE" ]] && return
   local tmp
-  tmp=$(mktemp /tmp/bisb-bl-rm-XXXXXX)
+  tmp=$(mktemp /tmp/${PROJECT_PREFIX}-bl-rm-XXXXXX)
   grep -v "^${ticket}|" "$BLACKLIST_FILE" > "$tmp" 2>/dev/null || true
   mv "$tmp" "$BLACKLIST_FILE"
   log_info "Removed ${ticket} from blacklist"
@@ -857,9 +869,9 @@ remove_from_blacklist() {
 # ═══════════════════════════════════════════════════════════════════════════════
 # When an agent has too many consecutive failures in a short window,
 # open the circuit breaker to prevent thrashing.
-# File: /tmp/bisb-cb-AGENT.state → failure_count|last_failure_ts|open_until_ts
+# File: /tmp/${PROJECT_PREFIX}-cb-AGENT.state → failure_count|last_failure_ts|open_until_ts
 
-CB_DIR="/tmp/bisb-circuit-breakers"
+CB_DIR="/tmp/${PROJECT_PREFIX}-circuit-breakers"
 CB_MAX_FAILURES=5        # failures in window → open breaker
 CB_WINDOW=600            # 10 min window
 CB_OPEN_DURATION=900     # 15 min breaker open
@@ -924,9 +936,9 @@ cb_reset() {
 
 # ─── Dependency Health Flags (Perplexity #1b) ────────────────────────────────
 # When a shared dependency is down, agents skip work instead of thrashing.
-# Files: /tmp/bisb-dep-{plane,github,claude}.down → timestamp when set
+# Files: /tmp/${PROJECT_PREFIX}-dep-{plane,github,claude}.down → timestamp when set
 
-DEP_FLAG_DIR="/tmp/bisb-dep-flags"
+DEP_FLAG_DIR="/tmp/${PROJECT_PREFIX}-dep-flags"
 DEP_DOWN_DURATION=300  # 5 min flag expiry
 
 mkdir -p "$DEP_FLAG_DIR" 2>/dev/null || true
@@ -967,7 +979,7 @@ dep_check_or_skip() {
 
 # ─── Poison Pill Detection (Perplexity #1c) ──────────────────────────────────
 # If a ticket is blacklisted more than N times in 24h, mark as Needs Human
-POISON_PILL_FILE="/tmp/bisb-poison-pills"
+POISON_PILL_FILE="/tmp/${PROJECT_PREFIX}-poison-pills"
 POISON_PILL_THRESHOLD=3  # blacklisted 3+ times in 24h
 
 check_poison_pill() {
@@ -1010,7 +1022,7 @@ record_blacklist_event() {
 # ═══════════════════════════════════════════════════════════════════════════════
 # JSON log lines for machine parsing + unified metrics JSONL
 
-STRUCTURED_LOG="/var/log/bisb/structured.log"
+STRUCTURED_LOG="${LOG_DIR}/structured.log"
 METRICS_FILE="/var/lib/bisb/data/metrics-agent-runs.jsonl"
 mkdir -p "$(dirname "$METRICS_FILE")" 2>/dev/null || true
 
@@ -1058,7 +1070,7 @@ log_metric() {
 # Classify failures and apply appropriate retry strategy.
 # Stores next_earliest_retry_ts in retry files.
 
-BACKOFF_DIR="/tmp/bisb-backoff"
+BACKOFF_DIR="/tmp/${PROJECT_PREFIX}-backoff"
 mkdir -p "$BACKOFF_DIR" 2>/dev/null || true
 
 # Error types: RATE_LIMIT, TRANSIENT, TIMEOUT, BAD_OUTPUT, PERMANENT
@@ -1320,7 +1332,7 @@ clean_cache() {
 }
 
 # ─── Structured Feedback ─────────────────────────────────────────────────────
-FEEDBACK_DIR="/tmp/bisb-feedback"
+FEEDBACK_DIR="/tmp/${PROJECT_PREFIX}-feedback"
 mkdir -p "$FEEDBACK_DIR"
 
 write_feedback() {
@@ -1359,15 +1371,15 @@ log_activity() {
   local report_file="${REPORT_DIR}/$(date +%Y-%m-%d).log"
   echo "$(date +%H:%M)|${agent}|${ticket}|${verdict}|${description}" >> "$report_file"
   # Also persist in per-ticket brief for cross-run memory
-  local brief_file="${BRIEF_DIR:-/tmp/bisb-notes}/${ticket}.md"
+  local brief_file="${BRIEF_DIR:-/tmp/${PROJECT_PREFIX}-notes}/${ticket}.md"
   echo "$(date -u '+%H:%M UTC')│${agent}│${verdict}│${description}" >> "$brief_file" 2>/dev/null || true
 }
 
 # ─── Per-ticket Brief Memory ─────────────────────────────────────────────────
-# Persistent notes across runs stored in /tmp/bisb-notes/BISB-XX.md.
+# Persistent notes across runs stored in /tmp/${PROJECT_PREFIX}-notes/BISB-XX.md.
 # Agents read this at start (via TICKET_BRIEF_CONTEXT env var set by run-agent.sh)
 # and key events are auto-appended via log_activity.
-BRIEF_DIR="/tmp/bisb-notes"
+BRIEF_DIR="/tmp/${PROJECT_PREFIX}-notes"
 mkdir -p "$BRIEF_DIR"
 
 # Returns the contents of the brief file for a ticket (empty if none)
@@ -1495,7 +1507,7 @@ select_model_with_feedback() {
 # The OAuth token has daily Sonnet caps. The API key draws from prepaid credit
 # ($4.79 at ~$0.06/call ≈ 80 calls). This separation gives us a paid escape
 # hatch for critical Youssef/Nadia work when the subscription cap is hit.
-RATE_LIMIT_FLAG="/tmp/bisb-sonnet-rate-limited"
+RATE_LIMIT_FLAG="/tmp/${PROJECT_PREFIX}-sonnet-rate-limited"
 RATE_LIMIT_COOLDOWN=900  # 15 minutes
 
 # API key budget: track spend to prevent blowing through the $4.79
@@ -1741,7 +1753,7 @@ activate_api_key_if_needed() {
 # Usage: claude_with_rate_check [claude args...]
 claude_with_rate_check() {
   local stderr_tmp
-  stderr_tmp=$(mktemp /tmp/bisb-claude-stderr-XXXXXX.txt)
+  stderr_tmp=$(mktemp /tmp/${PROJECT_PREFIX}-claude-stderr-XXXXXX.txt)
   local rc=0
   claude "$@" 2>"$stderr_tmp" || rc=$?
 
@@ -2139,8 +2151,8 @@ check_cooldown() {
 # Returns Layla's latest daily market intelligence report if it exists and
 # was generated today or yesterday (still relevant).
 get_layla_report() {
-  local report_file="/tmp/bisb-layla-latest-report.md"
-  local date_file="/tmp/bisb-layla-latest-report-date.txt"
+  local report_file="/tmp/${PROJECT_PREFIX}-layla-latest-report.md"
+  local date_file="/tmp/${PROJECT_PREFIX}-layla-latest-report-date.txt"
   if [[ -f "$report_file" && -f "$date_file" ]]; then
     local report_date
     report_date=$(cat "$date_file")
@@ -2157,11 +2169,11 @@ get_layla_report() {
 
 # ─── Hedi Message Access ────────────────────────────────────────────────────
 # Returns any pending messages from Hedi for a specific agent.
-# Messages are stored in /tmp/bisb-hedi-messages/{agent}-{timestamp}.md
+# Messages are stored in /tmp/${PROJECT_PREFIX}-hedi-messages/{agent}-{timestamp}.md
 # Usage: get_hedi_messages "nadia"
 get_hedi_messages() {
   local agent_name="$1"
-  local msg_dir="/tmp/bisb-hedi-messages"
+  local msg_dir="/tmp/${PROJECT_PREFIX}-hedi-messages"
   [[ -d "$msg_dir" ]] || return 0
 
   local found=false
@@ -2417,7 +2429,7 @@ claude_with_tracking() {
 
   # Run claude, capture output and exit code
   local output_file
-  output_file=$(mktemp /tmp/bisb-claude-output-XXXXXX)
+  output_file=$(mktemp /tmp/${PROJECT_PREFIX}-claude-output-XXXXXX)
   local exit_code=0
 
   claude "${claude_args[@]}" > "$output_file" 2>/dev/null || exit_code=$?

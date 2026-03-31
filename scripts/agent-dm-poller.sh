@@ -8,26 +8,26 @@
 # Storage:
 #   Last poll timestamp: /var/lib/bisb/data/agents/AGENT/last-dm-poll.txt
 #
-# Cron: */2 * * * * /opt/bisb-scripts/agent-dm-poller.sh >> /var/log/bisb/dm-poller.log 2>&1
+# Cron: */2 * * * * /opt/bisb-scripts/agent-dm-poller.sh >> ${LOG_DIR}/dm-poller.log 2>&1
 # =============================================================================
 set -euo pipefail
 
 export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 
 # ─── Single-instance lock (prevent overlapping cron runs) ─────────────────
-LOCK_FILE="/tmp/bisb-dm-poller.lock"
+LOCK_FILE="/tmp/${PROJECT_PREFIX}-dm-poller.lock"
 # Stale lock detection: if lock file exists and is older than 10 minutes,
 # the previous poller likely crashed — remove it
 if [[ -f "$LOCK_FILE" ]]; then
   _lock_age=$(( $(date +%s) - $(stat -c %Y "$LOCK_FILE" 2>/dev/null || echo 0) ))
   if (( _lock_age > 600 )); then
-    echo "[$(date -u '+%Y-%m-%d %H:%M:%S')] [INFO] Removing stale DM poller lock (age=${_lock_age}s)" >> /var/log/bisb/dm-poller.log
+    echo "[$(date -u '+%Y-%m-%d %H:%M:%S')] [INFO] Removing stale DM poller lock (age=${_lock_age}s)" >> ${LOG_DIR}/dm-poller.log
     rm -f "$LOCK_FILE"
   fi
 fi
 exec 200>"$LOCK_FILE"
 if ! flock -n 200; then
-  echo "[$(date -u '+%Y-%m-%d %H:%M:%S')] [INFO] DM poller already running — skipping this run" >> /var/log/bisb/dm-poller.log
+  echo "[$(date -u '+%Y-%m-%d %H:%M:%S')] [INFO] DM poller already running — skipping this run" >> ${LOG_DIR}/dm-poller.log
   exit 0
 fi
 
@@ -39,7 +39,7 @@ load_env
 # Cron already redirects stderr → dm-poller.log (2>&1), so don't set LOG_FILE
 # to avoid log_info writing twice (once to file, once via cron redirect)
 LOG_FILE=""
-mkdir -p /var/log/bisb /var/lib/bisb/data
+mkdir -p ${LOG_DIR} /var/lib/bisb/data
 
 log_info "=== DM Poller starting ==="
 
@@ -187,7 +187,7 @@ PYEOF
       "${agent}" \
       "${msg}" \
       "${HEDI_USERNAME}" \
-      >> "/var/log/bisb/dm-handler-${agent}-$(date +%Y-%m-%d).log" 2>&1 || true
+      >> "${LOG_DIR}/dm-handler-${agent}-$(date +%Y-%m-%d).log" 2>&1 || true
 
     log_info "DM handler completed for ${agent}"
   done <<< "$NEW_MESSAGES"
