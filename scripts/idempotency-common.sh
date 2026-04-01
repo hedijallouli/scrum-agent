@@ -22,7 +22,7 @@
 #   complete_run  # marks run as done, cleans up claim
 # =============================================================================
 
-IDEMPOTENCY_DIR="/var/lib/bisb/runs"
+IDEMPOTENCY_DIR="/var/lib/${PROJECT_PREFIX}/runs"
 mkdir -p "$IDEMPOTENCY_DIR"
 
 # Current run context (set by claim_run)

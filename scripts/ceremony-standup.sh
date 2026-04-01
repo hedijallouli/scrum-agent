@@ -120,7 +120,7 @@ else:
 " 2>/dev/null || echo "non disponible")
 
 # ─── 8. Build sprint context block ───────────────────────────────────────────
-DECISIONS_FILE="/var/lib/bisb/data/ceremony-decisions.jsonl"
+DECISIONS_FILE="/var/lib/${PROJECT_PREFIX}/data/ceremony-decisions.jsonl"
 RECENT_DECISIONS=""
 if [[ -f "$DECISIONS_FILE" ]]; then
   RECENT_DECISIONS=$(tail -5 "$DECISIONS_FILE" 2>/dev/null | python3 -c "

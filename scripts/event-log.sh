@@ -17,7 +17,7 @@
 #   agent_events "youssef" 50
 # =============================================================================
 
-EVENT_LOG_DIR="/var/lib/bisb/events"
+EVENT_LOG_DIR="/var/lib/${PROJECT_PREFIX}/events"
 EVENT_LOG_FILE="${EVENT_LOG_DIR}/events.jsonl"
 mkdir -p "$EVENT_LOG_DIR"
 

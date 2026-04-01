@@ -449,7 +449,7 @@ PYEOF
 # Returns: one-line string, e.g. "completed BISB-49 (PR submitted) — il y a 2h"
 get_agent_activity() {
   local agent="$1"
-  local activity_file="${DATA_DIR:-/var/lib/bisb/data}/agents/${agent}/last-activity.json"
+  local activity_file="${DATA_DIR:-/var/lib/${PROJECT_PREFIX}/data}/agents/${agent}/last-activity.json"
 
   if [[ -f "$activity_file" ]]; then
     local result

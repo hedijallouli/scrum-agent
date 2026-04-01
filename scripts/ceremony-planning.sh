@@ -73,7 +73,7 @@ TOP_KEYS=$(echo "$TOP_CANDIDATES" | grep -oP "${PROJECT_KEY}-\d+" | head -5 || e
 TOP_FIRST_KEY=$(echo "$TOP_KEYS" | head -1 || echo "")
 
 # Read recent retro decisions for cross-ceremony memory
-DECISIONS_FILE="/var/lib/bisb/data/ceremony-decisions.jsonl"
+DECISIONS_FILE="/var/lib/${PROJECT_PREFIX}/data/ceremony-decisions.jsonl"
 RECENT_DECISIONS_PLANNING=""
 if [[ -f "$DECISIONS_FILE" ]]; then
   RECENT_DECISIONS_PLANNING=$(tail -5 "$DECISIONS_FILE" 2>/dev/null | python3 -c "

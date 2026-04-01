@@ -1023,7 +1023,7 @@ record_blacklist_event() {
 # JSON log lines for machine parsing + unified metrics JSONL
 
 STRUCTURED_LOG="${LOG_DIR}/structured.log"
-METRICS_FILE="/var/lib/bisb/data/metrics-agent-runs.jsonl"
+METRICS_FILE="/var/lib/${PROJECT_PREFIX}/data/metrics-agent-runs.jsonl"
 mkdir -p "$(dirname "$METRICS_FILE")" 2>/dev/null || true
 
 # Generate a unique run ID per dispatch/agent invocation
@@ -1210,7 +1210,7 @@ clean_backoff() {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # ─── Per-Agent Budget Tracking ────────────────────────────────────────────────
-AGENT_BUDGET_FILE="/var/lib/bisb/data/costs/agent-budgets-$(date -u +%Y-%m-%d).json"
+AGENT_BUDGET_FILE="/var/lib/${PROJECT_PREFIX}/data/costs/agent-budgets-$(date -u +%Y-%m-%d).json"
 mkdir -p "$(dirname "$AGENT_BUDGET_FILE")" 2>/dev/null || true
 
 # Default daily budget shares (percentage of total daily budget)
@@ -1285,7 +1285,7 @@ sys.exit(1)
 }
 
 # ─── Response Caching ────────────────────────────────────────────────────────
-CACHE_DIR="/var/lib/bisb/cache"
+CACHE_DIR="/var/lib/${PROJECT_PREFIX}/cache"
 CACHE_MAX_AGE=3600  # 1 hour default
 
 mkdir -p "$CACHE_DIR" 2>/dev/null || true
@@ -1511,7 +1511,7 @@ RATE_LIMIT_FLAG="/tmp/${PROJECT_PREFIX}-sonnet-rate-limited"
 RATE_LIMIT_COOLDOWN=900  # 15 minutes
 
 # API key budget: track spend to prevent blowing through the $4.79
-API_KEY_BUDGET_FILE="/var/lib/bisb/data/api-key-spend.json"
+API_KEY_BUDGET_FILE="/var/lib/${PROJECT_PREFIX}/data/api-key-spend.json"
 API_KEY_BUDGET_MAX="${API_KEY_BUDGET_MAX:-4.50}"  # safety margin: stop at $4.50 of $4.79
 
 is_sonnet_rate_limited() {

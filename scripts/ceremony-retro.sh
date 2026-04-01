@@ -387,7 +387,7 @@ for i in "${!ACTION_SUMMARIES[@]}"; do
     log_info "Created retro ticket: ${TICKET_KEY} → ${ASSIGNED_AGENT}"
 
     # ── Write to cross-ceremony memory (ceremony-decisions.jsonl) ────────────
-    DECISIONS_FILE="/var/lib/bisb/data/ceremony-decisions.jsonl"
+    DECISIONS_FILE="/var/lib/${PROJECT_PREFIX}/data/ceremony-decisions.jsonl"
     mkdir -p "$(dirname "$DECISIONS_FILE")" 2>/dev/null || true
     TS=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
     # Escape double quotes for JSON safety

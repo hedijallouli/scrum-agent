@@ -6,7 +6,7 @@
 # from Hedi and calls agent-dm-handler.sh to generate a response.
 #
 # Storage:
-#   Last poll timestamp: /var/lib/bisb/data/agents/AGENT/last-dm-poll.txt
+#   Last poll timestamp: /var/lib/${PROJECT_PREFIX}/data/agents/AGENT/last-dm-poll.txt
 #
 # Cron: */2 * * * * /opt/bisb-scripts/agent-dm-poller.sh >> ${LOG_DIR}/dm-poller.log 2>&1
 # =============================================================================
@@ -39,7 +39,7 @@ load_env
 # Cron already redirects stderr → dm-poller.log (2>&1), so don't set LOG_FILE
 # to avoid log_info writing twice (once to file, once via cron redirect)
 LOG_FILE=""
-mkdir -p ${LOG_DIR} /var/lib/bisb/data
+mkdir -p ${LOG_DIR} /var/lib/${PROJECT_PREFIX}/data
 
 log_info "=== DM Poller starting ==="
 
@@ -99,7 +99,7 @@ for agent in "${AGENTS[@]}"; do
     continue
   fi
 
-  AGENT_DATA_DIR="/var/lib/bisb/data/agents/${agent}"
+  AGENT_DATA_DIR="/var/lib/${PROJECT_PREFIX}/data/agents/${agent}"
   mkdir -p "$AGENT_DATA_DIR"
   POLL_TIMESTAMP_FILE="${AGENT_DATA_DIR}/last-dm-poll.txt"
 

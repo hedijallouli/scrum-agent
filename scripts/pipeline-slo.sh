@@ -17,7 +17,7 @@
 #   slo_check_all   # runs all checks, returns combined alert count
 # =============================================================================
 
-SLO_HISTORY="/var/lib/bisb/data/slo-history.jsonl"
+SLO_HISTORY="/var/lib/${PROJECT_PREFIX}/data/slo-history.jsonl"
 mkdir -p "$(dirname "$SLO_HISTORY")" 2>/dev/null || true
 
 SLO_ALERTS=0
@@ -106,7 +106,7 @@ print(count)
 # ─── 3. Queue Age Check ──────────────────────────────────────────────────────
 # Checks if any ticket has been in same state for too long
 queue_age_check() {
-  local metrics_file="${METRICS_FILE:-/var/lib/bisb/data/metrics-agent-runs.jsonl}"
+  local metrics_file="${METRICS_FILE:-/var/lib/${PROJECT_PREFIX}/data/metrics-agent-runs.jsonl}"
   [[ -f "$metrics_file" ]] || return 0
 
   local now
@@ -147,7 +147,7 @@ if stuck:
 # ─── 4. Success Rate Check ───────────────────────────────────────────────────
 # Checks overall pipeline success rate in recent runs
 success_rate_check() {
-  local metrics_file="${METRICS_FILE:-/var/lib/bisb/data/metrics-agent-runs.jsonl}"
+  local metrics_file="${METRICS_FILE:-/var/lib/${PROJECT_PREFIX}/data/metrics-agent-runs.jsonl}"
   [[ -f "$metrics_file" ]] || return 0
 
   local stats

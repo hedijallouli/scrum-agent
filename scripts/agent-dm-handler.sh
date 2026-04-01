@@ -61,7 +61,7 @@ PERSONA=""
 [[ -z "$PERSONA" ]] && PERSONA="Tu es ${AGENT_NAME^}, ${ROLE} de l'équipe BisB."
 
 AGENT_CAP="${AGENT_NAME^}"
-AGENT_DATA_DIR="${DATA_DIR:-/var/lib/bisb/data}/agents/${AGENT_NAME}"
+AGENT_DATA_DIR="${DATA_DIR:-/var/lib/${PROJECT_PREFIX}/data}/agents/${AGENT_NAME}"
 mkdir -p "$AGENT_DATA_DIR"
 
 # ─── Mattermost config ────────────────────────────────────────────────────────
