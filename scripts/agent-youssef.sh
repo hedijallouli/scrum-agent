@@ -265,9 +265,29 @@ log_info "Running quality checks..."
 cd "$PROJECT_DIR"
 
 CHECKS_PASSED=true
-TYPECHECK_OUT=$(npm run typecheck 2>&1) || CHECKS_PASSED=false
-LINT_OUT=$(npm run lint 2>&1) || CHECKS_PASSED=false
-BUILD_OUT=$(npm run build 2>&1) || CHECKS_PASSED=false
+if [[ -f "package.json" ]]; then
+  # Only run checks that exist in package.json scripts
+  if grep -q '"typecheck"' package.json 2>/dev/null; then
+    TYPECHECK_OUT=$(npm run typecheck 2>&1) || CHECKS_PASSED=false
+  else
+    TYPECHECK_OUT="(no typecheck script)"
+  fi
+  if grep -q '"lint"' package.json 2>/dev/null; then
+    LINT_OUT=$(npm run lint 2>&1) || CHECKS_PASSED=false
+  else
+    LINT_OUT="(no lint script)"
+  fi
+  if grep -q '"build"' package.json 2>/dev/null; then
+    BUILD_OUT=$(npm run build 2>&1) || CHECKS_PASSED=false
+  else
+    BUILD_OUT="(no build script)"
+  fi
+else
+  log_info "No package.json — skipping quality checks"
+  TYPECHECK_OUT="(no package.json)"
+  LINT_OUT="(no package.json)"
+  BUILD_OUT="(no package.json)"
+fi
 
 if [[ "$CHECKS_PASSED" == "false" ]]; then
   log_info "Quality checks failed, asking Claude to fix..."
