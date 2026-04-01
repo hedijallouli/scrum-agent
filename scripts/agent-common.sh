@@ -2279,7 +2279,10 @@ mkdir -p "$WORKTREE_BASE"
 prepare_isolated_workspace() {
   local ticket="$1" branch="$2"
   local worktree_path="${WORKTREE_BASE}/${branch}"
-  
+
+  # Ensure parent directory exists (branch may contain / e.g. feature/XXX)
+  mkdir -p "$(dirname "$worktree_path")"
+
   # Clean up stale worktree
   if [[ -d "$worktree_path" ]]; then
     cd "$PROJECT_DIR"

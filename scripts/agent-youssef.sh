@@ -203,8 +203,9 @@ fi
 # ─── 5. Invoke Claude Code to implement ──────────────────────────────────────
 log_info "Invoking Claude Code (${MODEL}) for implementation..."
 
-CLAUDE_PROMPT="You are Youssef, the Dev agent for BisB (Business is Business).
+CLAUDE_PROMPT="You are Youssef, the Dev agent.
 Read the file ai/dev.md for your complete rules and coding standards.
+Read CLAUDE.md for project overview and conventions.
 
 TICKET: ${TICKET_KEY}
 TITLE: ${SUMMARY}
@@ -224,38 +225,30 @@ fi
 
 CLAUDE_PROMPT+="
 CRITICAL RULES:
-- Follow existing patterns in the codebase (check packages/ for examples)
-- Max 300 lines of changes total
+- Read existing code to understand patterns before writing new code
+- Max ${MAX_PR_LINES:-300} lines of changes total
 - TypeScript strict mode, no any types
-- Monorepo: packages/engine (game logic), packages/web (React UI)
-- Engine must be framework-agnostic (no React imports in engine)
-- Use Vitest for engine tests, React + TailwindCSS + Zustand for UI
 - Do NOT install new dependencies without clear justification
 - Do NOT refactor unrelated code
 - Do NOT add console.log statements
-- Reference game rules from BisB/Regle du jeu BISB.pdf for accuracy
+- Follow all conventions from ai/dev.md and CLAUDE.md
 "
 
 # Add retro-action wiring context if applicable
 if echo "$LABELS" | grep -q "retro-action" 2>/dev/null; then
   CLAUDE_PROMPT+="
 RETRO ACTION ITEM — WIRING REQUIRED:
-This ticket is a retrospective action item. You MUST ensure your changes are WIRED INTO the pipeline:
-- If you create templates, checklists, or docs: you MUST ALSO modify the relevant agent script
-  (n8n/scripts/agent-*.sh) to READ or USE the new files. Templates nobody reads are useless.
-- Nadia (QA) has NO file access — her rules must be inlined in n8n/scripts/agent-nadia.sh prompt
-- Rami (Architect+DevOps) does architecture review AND automated diff-based checks — he does NOT read PR descriptions or markdown files
-- Pre-commit hooks must be auto-installed via package.json prepare script (not just created)
-- Creating a markdown file without modifying any agent script is NOT an acceptable solution
+This ticket is a retrospective action item. Ensure your changes are WIRED INTO the pipeline.
+Creating a markdown file without modifying any agent script is NOT an acceptable solution.
 "
 fi
 
 CLAUDE_PROMPT+="
 STEPS:
-1. Read the codebase to understand existing patterns (check packages/engine and packages/web)
-2. Implement the feature according to the specification
-3. Run: npm run lint (fix any errors)
-4. Run: npm run build (fix any errors)
+1. Read CLAUDE.md and ai/dev.md to understand the project and coding standards
+2. Read the codebase to understand existing patterns
+3. Implement the feature according to the specification
+4. If package.json exists: run npm run lint and npm run build (fix any errors)
 5. Stage your changes with git add
 
 When done, output a brief summary of what you implemented."
