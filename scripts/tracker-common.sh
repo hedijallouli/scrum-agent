@@ -614,14 +614,15 @@ for s in states:
 
     local state_id
     case "$state_name" in
-      "Todo")       state_id="0cdf8a6f-61d7-478f-b90d-123c3d40c59a" ;;
-      "Ready")      state_id="8b48ad73-013d-499c-9a17-32426d734102" ;;
-      "In Progress") state_id="8ee90e44-e99b-45ca-b366-bd35370bcc3f" ;;
-      "In Review")  state_id="da24b884-7df3-4c95-8c4a-8ea1e30653f1" ;;
-      "QA")         state_id="03afa4d7-a380-426c-8d14-edeb082fc1da" ;;
-      "Merged")     state_id="1843e452-9ab3-4a4c-8d32-4f6b1c18eb4d" ;;
-      "Done")       state_id="62e32c32-150b-4e65-827e-0caccec15adf" ;;
-      *)            log_info "plane_update_state: unknown state '$state_name'"; return 1 ;;
+      "Backlog")     state_id="${STATE_BACKLOG:-0cdf8a6f-61d7-478f-b90d-123c3d40c59a}" ;;
+      "Todo")        state_id="${STATE_TODO:-0cdf8a6f-61d7-478f-b90d-123c3d40c59a}" ;;
+      "Ready")       state_id="${STATE_READY:-8b48ad73-013d-499c-9a17-32426d734102}" ;;
+      "In Progress") state_id="${STATE_IN_PROGRESS:-8ee90e44-e99b-45ca-b366-bd35370bcc3f}" ;;
+      "In Review")   state_id="${STATE_IN_REVIEW:-da24b884-7df3-4c95-8c4a-8ea1e30653f1}" ;;
+      "QA")          state_id="${STATE_QA:-03afa4d7-a380-426c-8d14-edeb082fc1da}" ;;
+      "Merged")      state_id="${STATE_MERGED:-1843e452-9ab3-4a4c-8d32-4f6b1c18eb4d}" ;;
+      "Done")        state_id="${STATE_DONE:-62e32c32-150b-4e65-827e-0caccec15adf}" ;;
+      *)             log_info "plane_update_state: unknown state '$state_name'"; return 1 ;;
     esac
 
     python3 - "$seq_num" "$state_id" << 'PYEOF'
@@ -687,7 +688,7 @@ PYEOF
   # Get unassigned tickets in Todo state (for Salma to pick up as new work)
   plane_get_unassigned_todo() {
     local project_key="${JIRA_PROJECT:-BISB}"
-    local todo_state_id="0cdf8a6f-61d7-478f-b90d-123c3d40c59a"
+    local todo_state_id="${STATE_TODO:-0cdf8a6f-61d7-478f-b90d-123c3d40c59a}"
     local blocked_label="blocked"
     local needs_human_label="needs-human"
 
@@ -739,14 +740,15 @@ PYEOF
     # Map state name to UUID (same hardcoded list as plane_update_state)
     local state_id
     case "$state_name" in
-      "Todo")       state_id="0cdf8a6f-61d7-478f-b90d-123c3d40c59a" ;;
-      "In Progress") state_id="8ee90e44-e99b-45ca-b366-bd35370bcc3f" ;;
-      "In Review")  state_id="da24b884-7df3-4c95-8c4a-8ea1e30653f1" ;;
-      "QA")         state_id="03afa4d7-a380-426c-8d14-edeb082fc1da" ;;
-      "Ready")      state_id="8b48ad73-013d-499c-9a17-32426d734102" ;;
-      "Merged")     state_id="1843e452-9ab3-4a4c-8d32-4f6b1c18eb4d" ;;
-      "Done")       state_id="62e32c32-150b-4e65-827e-0caccec15adf" ;;
-      *)            log_info "plane_get_unassigned_by_state: unknown state '$state_name'"; return 1 ;;
+      "Backlog")     state_id="${STATE_BACKLOG:-0cdf8a6f-61d7-478f-b90d-123c3d40c59a}" ;;
+      "Todo")        state_id="${STATE_TODO:-0cdf8a6f-61d7-478f-b90d-123c3d40c59a}" ;;
+      "In Progress") state_id="${STATE_IN_PROGRESS:-8ee90e44-e99b-45ca-b366-bd35370bcc3f}" ;;
+      "In Review")   state_id="${STATE_IN_REVIEW:-da24b884-7df3-4c95-8c4a-8ea1e30653f1}" ;;
+      "QA")          state_id="${STATE_QA:-03afa4d7-a380-426c-8d14-edeb082fc1da}" ;;
+      "Ready")       state_id="${STATE_READY:-8b48ad73-013d-499c-9a17-32426d734102}" ;;
+      "Merged")      state_id="${STATE_MERGED:-1843e452-9ab3-4a4c-8d32-4f6b1c18eb4d}" ;;
+      "Done")        state_id="${STATE_DONE:-62e32c32-150b-4e65-827e-0caccec15adf}" ;;
+      *)             log_info "plane_get_unassigned_by_state: unknown state '$state_name'"; return 1 ;;
     esac
 
     python3 - "$project_key" "$state_id" "$max" << 'PYEOF'
