@@ -432,15 +432,16 @@ cd "$PROJECT_DIR"
 # Create a short summary for commit message
 SHORT_SUMMARY=$(echo "$SUMMARY" | head -c 60)
 
-# Stage app + infra changes — never stage n8n/ or ai/ agent scripts
+# Stage app + infra changes — never stage ai/ agent scripts or scrum-agent/
 # Note: git add -A fails entirely if ANY pathspec doesn't match a file,
 # so we split into separate calls. Each call is safe to fail independently.
 git add -A -- packages/ 2>/dev/null || true
+git add -A -- src/ 2>/dev/null || true
 git add -A -- public/ 2>/dev/null || true
-git add -A -- .gitignore package.json package-lock.json 2>/dev/null || true
-git add -A -- tsconfig*.json vite.config.* tailwind.config.* eslint.config.* 2>/dev/null || true
-git add -A -- index.html components.json 2>/dev/null || true
-git add -A -- deploy.sh nginx/ .env.*.example *.md 2>/dev/null || true
+git add -A -- .gitignore package.json package-lock.json pnpm-lock.yaml 2>/dev/null || true
+git add -A -- tsconfig*.json vite.config.* tailwind.config.* eslint.config.* postcss.config.* 2>/dev/null || true
+git add -A -- index.html index-vite.html components.json 2>/dev/null || true
+git add -A -- deploy.sh nginx/ .env.*.example 2>/dev/null || true
 git add -A -- .github/ 2>/dev/null || true
 git commit -m "$(cat <<EOF
 feat(${TICKET_KEY}): ${SHORT_SUMMARY}
@@ -523,8 +524,8 @@ else
 ## Summary
 ${SUMMARY}
 
-## Jira
-${JIRA_BASE_URL}/browse/${TICKET_KEY}
+## Tracker
+${TICKET_KEY}
 
 ## Changes
 ${DIFF_SIZE} lines changed
@@ -534,9 +535,7 @@ ${DIFF_SIZE} lines changed
 - [x] Lint passes
 - [x] Build succeeds
 
-## DevOps Review Required
-- [ ] Game data changes (board spaces, properties, stocks, environment cards)
-- [ ] Game engine changes (core state, turn flow, game systems)
+## Review Checklist
 - [${DR_CONFIG}] Configuration changes (env vars, secrets, service config)
 - [${DR_DEPLOY}] Deployment/infrastructure changes (nginx, systemd, server setup)
 - [${DR_SECURITY}] Security-sensitive changes (API keys, tokens, data access patterns)
