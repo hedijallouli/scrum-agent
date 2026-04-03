@@ -395,6 +395,16 @@ process_agent() {
           fi
         fi
         ;;
+      rami)
+        # Rami picks up QA-passed tickets (state=QA) for DevOps review + merge
+        if declare -f plane_get_unassigned_by_state &>/dev/null; then
+          local qa_tickets
+          qa_tickets=$(plane_get_unassigned_by_state "QA" "$max_tickets" 2>/dev/null || echo "")
+          if [[ -n "$qa_tickets" ]]; then
+            tickets="${tickets} ${qa_tickets}"
+          fi
+        fi
+        ;;
       omar)
         # Omar also picks up Done tickets assigned to him (for merge tracking)
         if declare -f plane_get_assigned_tickets &>/dev/null; then

@@ -617,7 +617,8 @@ ${REVIEW_SUMMARY}
 Handing to Rami for DevOps verification and merge."
 
   jira_update_labels "$TICKET_KEY" "agent:nadia" "agent:rami"
-  jira_transition "$TICKET_KEY" "review" || true
+  jira_transition "$TICKET_KEY" "qa" || true
+  plane_set_assignee "$TICKET_KEY" "rami" 2>/dev/null || true
   reset_retry "$TICKET_KEY" "nadia"
 
   PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$')
@@ -643,7 +644,8 @@ ${WARNINGS}
 Forwarding to Rami for DevOps verification and merge."
 
   jira_update_labels "$TICKET_KEY" "agent:nadia" "agent:rami"
-  jira_transition "$TICKET_KEY" "review" || true
+  jira_transition "$TICKET_KEY" "qa" || true
+  plane_set_assignee "$TICKET_KEY" "rami" 2>/dev/null || true
   reset_retry "$TICKET_KEY" "nadia"
 
   PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$')
