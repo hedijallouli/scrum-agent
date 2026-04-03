@@ -18,7 +18,7 @@ source "${SCRIPT_DIR}/agent-common.sh"
 # Override base branch: PRs merge into dev, not master
 BASE_BRANCH="${BASE_BRANCH:-dev}"
 
-TICKET_KEY="${1:?Usage: agent-rami.sh BISB-XX}"
+TICKET_KEY="${1:?Usage: agent-rami.sh TICKET-XX}"
 MAX_RETRIES_ARCH=2   # Architecture review: 2 tries before escalating
 MAX_RETRIES_DEVOPS=3 # DevOps/merge: 3 tries before escalating
 
@@ -81,7 +81,8 @@ Could not validate technical design after ${MAX_RETRIES_ARCH} attempts. Needs hu
     if ! echo "$LABELS" | grep -q "enriched" 2>/dev/null; then
       log_info "Retro-action ticket — writing DevOps perspective comment and handing to Salma"
 
-      RETRO_PROMPT="You are Rami, the Technical Architect and DevOps lead for BisB (Business is Business).
+      RETRO_PROMPT="You are Rami, the Technical Architect and DevOps lead.
+Read CLAUDE.md and ai/architect.md for project context and your role.
 
 TICKET: ${TICKET_KEY}
 TITLE: ${SUMMARY}
@@ -147,7 +148,8 @@ Simple ticket — no architecture review needed. Forwarding to development."
     log_info "Entering architecture decision mode for $TICKET_KEY"
     ARCH_MODEL="claude-sonnet-4-20250514"
 
-    ARCH_PROMPT="You are Rami, the Technical Architect for Business is Business (BisB) — a Tunisian board game being digitized as a React/TypeScript web app.
+    ARCH_PROMPT="You are Rami, the Technical Architect.
+Read CLAUDE.md and ai/architect.md for project context and your role.
 
 TICKET: $TICKET_KEY
 SUMMARY: $SUMMARY
@@ -196,8 +198,8 @@ ${CLAUDE_OUTPUT}"
   fi
   log_info "Invoking Claude (${MODEL}) for architecture review..."
 
-  CLAUDE_PROMPT="You are Rami, the Technical Architect for BisB (Business is Business).
-Read the file ai/architect.md for your complete rules and review checklist.
+  CLAUDE_PROMPT="You are Rami, the Technical Architect.
+Read CLAUDE.md for project overview and ai/architect.md for your complete rules and review checklist.
 
 TICKET: ${TICKET_KEY}
 TITLE: ${SUMMARY}
@@ -509,10 +511,12 @@ if [[ "$CHECKS_PASSED" == "true" ]]; then
   log_info "PR #${PR_NUMBER} merge status: ${MERGE_STATUS}"
 
   # Run engine tests before merge
-  log_info "Running engine tests..."
+  log_info "Running project tests..."
   cd "$PROJECT_DIR"
   git fetch origin "$PR_BRANCH" 2>/dev/null
-  TEST_OUTPUT=$(npm test --workspace=@bisb/engine 2>&1) || {
+  # Use configured test command from .agent-config.json, fallback to npm test
+  local TEST_CMD="${PROJECT_TEST_CMD:-npm test}"
+  TEST_OUTPUT=$($TEST_CMD 2>&1) || {
     log_info "Engine tests failed — sending back to Youssef"
     write_feedback "$TICKET_KEY" "rami" "TESTS_FAILED" "Engine tests failed:\n${TEST_OUTPUT}"
     jira_add_rich_comment "$TICKET_KEY" "rami" "FAIL" "## Engine Tests Failed
@@ -555,7 +559,7 @@ PR #${PR_NUMBER} not yet mergeable (status: ${MERGE_STATUS}). Waiting for checks
   fi
 
   # Clean up worktree before merge
-  WORKTREE_BASE="/opt/bisb-worktrees"
+  WORKTREE_BASE="/opt/${PROJECT_PREFIX}-worktrees"
   for wt_dir in "${WORKTREE_BASE}"/feature/*; do
     [[ -d "$wt_dir" ]] || continue
     wt_branch=$(basename "$wt_dir")
@@ -605,17 +609,17 @@ PR #${PR_NUMBER} not yet mergeable (status: ${MERGE_STATUS}). Waiting for checks
     POST_MERGE_OK=true
     POST_MERGE_ERRORS=""
 
-    # 1. Engine tests
-    if ! npm test --workspace=@bisb/engine --if-present 2>/dev/null; then
+    # 1. Project tests
+    if ! ${PROJECT_TEST_CMD:-npm test} 2>/dev/null; then
       POST_MERGE_OK=false
-      POST_MERGE_ERRORS="${POST_MERGE_ERRORS}\n- Engine tests FAILED after merge"
-      log_error "Post-merge engine tests FAILED"
+      POST_MERGE_ERRORS="${POST_MERGE_ERRORS}\n- Project tests FAILED after merge"
+      log_error "Post-merge project tests FAILED"
     else
       log_info "Post-merge engine tests passed"
     fi
 
     # 2. Build check
-    if ! npm run build --workspace=@bisb/web --if-present 2>/dev/null; then
+    if ! ${PROJECT_BUILD_CMD:-npm run build} 2>/dev/null; then
       POST_MERGE_OK=false
       POST_MERGE_ERRORS="${POST_MERGE_ERRORS}\n- Build FAILED after merge"
       log_error "Post-merge build FAILED"
