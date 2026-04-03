@@ -534,50 +534,40 @@ for issue in filtered[:max_results]:
   # Override jira_transition → Plane state change
   jira_transition() {
     local key="$1" target_state="$2"
-    local seq_num="${key##*-}"
-    local issue_id
-    # Use sequence_id lookup (exact match) instead of search
-    issue_id=$(plane_api GET "/api/v1/workspaces/${PLANE_WS}/projects/${PLANE_PID}/issues/?per_page=200" 2>/dev/null \
-      | python3 -c "
-import json,sys
-d=json.load(sys.stdin); r=d.get('results',[])
-seq=int(sys.argv[1])
-i=next((x for x in r if x.get('sequence_id')==seq),None)
-print(i['id'] if i else '')" "$seq_num" 2>/dev/null)
-    [[ -z "$issue_id" ]] && return 1
 
-    # Map Jira transition names to Plane state groups
-    local state_group
-    case "$target_state" in
-      done|Done|terminé|Terminé|DONE|termine|Termine)  state_group="completed" ;;
-      inprogress|"In Progress") state_group="started" ;;
-      todo|"To Do")    state_group="unstarted" ;;
-      *)               state_group="started" ;;
+    # Map Jira-style transition names to Plane state names
+    local plane_state
+    case "${target_state,,}" in
+      done|terminé|terminee|termine)         plane_state="Done" ;;
+      cours|"in progress"|"en cours"|inprogress) plane_state="In Progress" ;;
+      review|"in review"|revue)              plane_state="In Review" ;;
+      todo|"to do"|"a faire"|"à faire")      plane_state="Todo" ;;
+      ready)                                 plane_state="Ready" ;;
+      qa)                                    plane_state="QA" ;;
+      merged)                                plane_state="Merged" ;;
+      blocked)                               plane_state="Blocked" ;;
+      *)                                     plane_state="In Progress" ;;
     esac
 
-    # Get state ID for this group
-    local state_id
-    state_id=$(plane_api GET "/api/v1/workspaces/${PLANE_WS}/projects/${PLANE_PID}/states/" 2>/dev/null \
-      | python3 -c "
-import json,sys
-states = json.load(sys.stdin)
-if isinstance(states, dict): states = states.get('results', [])
-group = sys.argv[1]
-for s in states:
-    if s.get('group') == group:
-        print(s['id'])
-        break
-" "$state_group" 2>/dev/null)
-
-    [[ -z "$state_id" ]] && return 1
-    plane_api PATCH "/api/v1/workspaces/${PLANE_WS}/projects/${PLANE_PID}/issues/${issue_id}/" \
-      "{\"state\":\"${state_id}\"}" >/dev/null 2>&1
+    plane_update_state "$key" "$plane_state" 2>/dev/null || true
+    log_info "Transitioned ${key} to ${plane_state} (via Plane)"
   }
 
   # Override jira_add_rich_comment → Plane plain comment (no header, no avatar, no verdict badge)
   jira_add_rich_comment() {
     local key="$1" agent="$2" verdict="$3" message="$4"
     jira_add_comment "$key" "$message"
+  }
+
+  # Override jira_assign_to_me → Plane set assignee
+  jira_assign_to_me() {
+    local key="$1"
+    plane_set_assignee "$key" "${AGENT_NAME:-}" 2>/dev/null || true
+  }
+
+  # Override jira_update_labels → no-op (Plane uses state-based routing, not labels)
+  jira_update_labels() {
+    return 0
   }
 
   # Override jira_set_spec → Plane markdown description (no ADF panels needed)
