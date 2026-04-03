@@ -510,29 +510,33 @@ if [[ "$CHECKS_PASSED" == "true" ]]; then
   MERGE_STATUS=$(gh pr view "$PR_NUMBER" --json mergeable --jq '.mergeable' 2>/dev/null || echo "UNKNOWN")
   log_info "PR #${PR_NUMBER} merge status: ${MERGE_STATUS}"
 
-  # Run engine tests before merge
+  # Run project tests before merge (skip if no package.json or no test script)
   log_info "Running project tests..."
   cd "$PROJECT_DIR"
   git fetch origin "$PR_BRANCH" 2>/dev/null
-  # Use configured test command from .agent-config.json, fallback to npm test
   local TEST_CMD="${PROJECT_TEST_CMD:-npm test}"
-  TEST_OUTPUT=$($TEST_CMD 2>&1) || {
-    log_info "Engine tests failed — sending back to Youssef"
-    write_feedback "$TICKET_KEY" "rami" "TESTS_FAILED" "Engine tests failed:\n${TEST_OUTPUT}"
-    jira_add_rich_comment "$TICKET_KEY" "rami" "FAIL" "## Engine Tests Failed
+  if [[ ! -f "package.json" ]] || ! grep -q '"test"' package.json 2>/dev/null; then
+    log_info "No test script found — skipping pre-merge tests"
+    TEST_OUTPUT="(skipped — no test script)"
+  else
+    TEST_OUTPUT=$($TEST_CMD 2>&1) || {
+      log_info "Project tests failed — sending back to Youssef"
+      write_feedback "$TICKET_KEY" "rami" "TESTS_FAILED" "Tests failed:\n${TEST_OUTPUT}"
+      jira_add_rich_comment "$TICKET_KEY" "rami" "FAIL" "## Tests Failed
 Tests failed on merge candidate. Sending back to Youssef.
 
 \`\`\`
 $(echo "$TEST_OUTPUT" | tail -20)
 \`\`\`"
-    jira_update_labels "$TICKET_KEY" "agent:rami" "agent:youssef"
-    increment_retry "$TICKET_KEY" "rami-devops"
-    slack_notify "*$(mm_ticket_link "${TICKET_KEY}")* — tests échoués avant merge. $(mm_mention youssef), je te renvoie la PR — détails dans le ticket." "pipeline" "danger"
-    log_activity "rami" "$TICKET_KEY" "TESTS_FAILED" "Engine tests failed"
-    append_ticket_history "$TICKET_KEY" "rami" "TESTS_FAILED" "Engine tests failed before merge"
-    exit 0
-  }
-  log_info "Engine tests passed"
+      jira_update_labels "$TICKET_KEY" "agent:rami" "agent:youssef"
+      increment_retry "$TICKET_KEY" "rami-devops"
+      slack_notify "*$(mm_ticket_link "${TICKET_KEY}")* — tests échoués avant merge. $(mm_mention youssef), je te renvoie la PR — détails dans le ticket." "pipeline" "danger"
+      log_activity "rami" "$TICKET_KEY" "TESTS_FAILED" "Tests failed"
+      append_ticket_history "$TICKET_KEY" "rami" "TESTS_FAILED" "Tests failed before merge"
+      exit 0
+    }
+    log_info "Project tests passed"
+  fi
 
   MERGE_OUTPUT=""
   MERGE_SUCCESS=true
@@ -609,22 +613,30 @@ PR #${PR_NUMBER} not yet mergeable (status: ${MERGE_STATUS}). Waiting for checks
     POST_MERGE_OK=true
     POST_MERGE_ERRORS=""
 
-    # 1. Project tests
-    if ! ${PROJECT_TEST_CMD:-npm test} 2>/dev/null; then
-      POST_MERGE_OK=false
-      POST_MERGE_ERRORS="${POST_MERGE_ERRORS}\n- Project tests FAILED after merge"
-      log_error "Post-merge project tests FAILED"
+    # 1. Project tests (skip if no test script)
+    if [[ -f "package.json" ]] && grep -q '"test"' package.json 2>/dev/null; then
+      if ! ${PROJECT_TEST_CMD:-npm test} 2>/dev/null; then
+        POST_MERGE_OK=false
+        POST_MERGE_ERRORS="${POST_MERGE_ERRORS}\n- Project tests FAILED after merge"
+        log_error "Post-merge project tests FAILED"
+      else
+        log_info "Post-merge project tests passed"
+      fi
     else
-      log_info "Post-merge engine tests passed"
+      log_info "No test script — skipping post-merge tests"
     fi
 
-    # 2. Build check
-    if ! ${PROJECT_BUILD_CMD:-npm run build} 2>/dev/null; then
-      POST_MERGE_OK=false
-      POST_MERGE_ERRORS="${POST_MERGE_ERRORS}\n- Build FAILED after merge"
-      log_error "Post-merge build FAILED"
+    # 2. Build check (skip if no build script)
+    if [[ -f "package.json" ]] && grep -q '"build"' package.json 2>/dev/null; then
+      if ! ${PROJECT_BUILD_CMD:-npm run build} 2>/dev/null; then
+        POST_MERGE_OK=false
+        POST_MERGE_ERRORS="${POST_MERGE_ERRORS}\n- Build FAILED after merge"
+        log_error "Post-merge build FAILED"
+      else
+        log_info "Post-merge build passed"
+      fi
     else
-      log_info "Post-merge build passed"
+      log_info "No build script — skipping post-merge build"
     fi
 
     if [[ "$POST_MERGE_OK" == "false" ]]; then
