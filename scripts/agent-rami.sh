@@ -514,7 +514,7 @@ if [[ "$CHECKS_PASSED" == "true" ]]; then
   log_info "Running project tests..."
   cd "$PROJECT_DIR"
   git fetch origin "$PR_BRANCH" 2>/dev/null
-  local TEST_CMD="${PROJECT_TEST_CMD:-npm test}"
+  TEST_CMD="${PROJECT_TEST_CMD:-npm test}"
   if [[ ! -f "package.json" ]] || ! grep -q '"test"' package.json 2>/dev/null; then
     log_info "No test script found — skipping pre-merge tests"
     TEST_OUTPUT="(skipped — no test script)"
