@@ -647,7 +647,7 @@ Forwarding to Rami for DevOps verification and merge."
   reset_retry "$TICKET_KEY" "nadia"
 
   PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$')
-  SLACK_WARNINGS=$(echo "$WARNINGS" | strip_markdown | grep '^- ' | head -3)
+  SLACK_WARNINGS=$(echo "$WARNINGS" | strip_markdown | grep '^- ' | head -3 || true)
   slack_notify "$(mm_ticket_link "${TICKET_KEY}") approuvé avec réserves — fonctionnel, mais quelques points à surveiller pour les prochaines PRs. Rami, c'est à toi.
 [PR #${PR_NUM}](${PR_URL})
 ${SLACK_WARNINGS}" "pipeline" "warning"
@@ -678,7 +678,7 @@ Sending back to Youssef for fixes."
   increment_retry "$TICKET_KEY" "nadia"
 
   PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$')
-  SLACK_ISSUES=$(echo "$ISSUES" | strip_markdown | grep '^- ' | head -3)
+  SLACK_ISSUES=$(echo "$ISSUES" | strip_markdown | grep '^- ' | head -3 || true)
   slack_notify "$(mm_ticket_link "${TICKET_KEY}") refusé (tentative $((retry_count + 1))/${MAX_RETRIES}) — j'ai listé les points bloquants dans le ticket. Youssef, je te laisse corriger, c'est détaillé.
 [PR #${PR_NUM}](${PR_URL})
 ${SLACK_ISSUES}" "pipeline" "danger"
