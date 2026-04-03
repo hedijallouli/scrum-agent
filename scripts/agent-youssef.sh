@@ -582,6 +582,7 @@ ${SCREENSHOT_NOTE:+Screenshot attached.}
 
 Handing to Nadia for QA review."
 jira_update_labels "$TICKET_KEY" "agent:youssef" "agent:nadia"
+jira_transition "$TICKET_KEY" "review" || true
 reset_retry "$TICKET_KEY" "youssef"
 clear_feedback "$TICKET_KEY"
 
