@@ -658,7 +658,7 @@ $(echo -e "$POST_MERGE_ERRORS")
 - Original PR changes need to be re-applied after fixing
 
 ## Revert Details
-${REVERT_OUTPUT}"
+${REVERT_OUTPUT}" || true
 
       jira_update_labels "$TICKET_KEY" "agent:rami" "agent:youssef"
       increment_retry "$TICKET_KEY" "youssef"
@@ -666,7 +666,7 @@ ${REVERT_OUTPUT}"
 
       slack_notify "**Revert** — *$(mm_ticket_link "${TICKET_KEY}")*: échec post-merge sur \`${BASE_BRANCH}\`
 $(echo -e "$POST_MERGE_ERRORS")
-Auto-reverted, sent back to Youssef." "pipeline" "danger"
+Auto-reverted, sent back to Youssef." "pipeline" "danger" || true
 
       log_activity "rami" "$TICKET_KEY" "REVERTED" "Post-merge failure, auto-reverted"
       append_ticket_history "$TICKET_KEY" "rami" "REVERTED" "Post-merge build/test failure, auto-reverted"
@@ -695,12 +695,13 @@ Lines changed: ${DIFF_SIZE}
 - Youssef: Implemented
 - Nadia: QA passed
 - Rami: DevOps verified + merged into dev + post-merge verified
-- Omar: Pending master merge tracking"
+- Omar: Pending master merge tracking" || true
 
       jira_update_labels "$TICKET_KEY" "agent:rami" "agent:omar"
+      jira_transition "$TICKET_KEY" "done" || true
       reset_retry "$TICKET_KEY" "rami-devops"
 
-      slack_notify "$(mm_ticket_link "${TICKET_KEY}") mergée sur \`${BASE_BRANCH}\` — PR #${PR_NUMBER} propre (${DIFF_SIZE} lignes), vérification post-merge OK. Transmis à Omar pour suivi de la merge dans master." "pipeline" "good"
+      slack_notify "$(mm_ticket_link "${TICKET_KEY}") mergée sur \`${BASE_BRANCH}\` — PR #${PR_NUMBER} propre (${DIFF_SIZE} lignes), vérification post-merge OK. Transmis à Omar pour suivi de la merge dans master." "pipeline" "good" || true
 
       log_activity "rami" "$TICKET_KEY" "MERGED" "PR #${PR_NUMBER} merged to ${BASE_BRANCH}, post-merge verified"
       append_ticket_history "$TICKET_KEY" "rami" "MERGED" "PR #${PR_NUMBER} merged, all checks passed + post-merge verified"
@@ -715,10 +716,10 @@ Lines changed: ${DIFF_SIZE}
 PR: ${PR_URL}
 
 Automated checks passed but merge failed. Sending back to Youssef.
-- Error: ${MERGE_OUTPUT}"
+- Error: ${MERGE_OUTPUT}" || true
     jira_update_labels "$TICKET_KEY" "agent:rami" "agent:youssef"
     increment_retry "$TICKET_KEY" "youssef"
-    slack_notify "*$(mm_ticket_link "${TICKET_KEY}")* — merge échoué. $(mm_mention youssef), je te renvoie la PR — vérifie les logs." "pipeline" "danger"
+    slack_notify "*$(mm_ticket_link "${TICKET_KEY}")* — merge échoué. $(mm_mention youssef), je te renvoie la PR — vérifie les logs." "pipeline" "danger" || true
     log_activity "rami" "$TICKET_KEY" "MERGE_FAILED" "PR merge failed"
     append_ticket_history "$TICKET_KEY" "rami" "MERGE_FAILED" "$(echo "$MERGE_OUTPUT" | head -1 | head -c 100)"
   fi
