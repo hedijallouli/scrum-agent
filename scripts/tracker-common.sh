@@ -540,7 +540,7 @@ for issue in filtered[:max_results]:
     local plane_state
     case "${target_state,,}" in
       done|terminé|terminee|termine)         plane_state="Done" ;;
-      cours|"in progress"|"en cours"|inprogress) plane_state="In Progress" ;;
+      cours|"in progress"|"en cours"|inprogress|in_progress) plane_state="In Progress" ;;
       review|"in review"|revue)              plane_state="In Review" ;;
       todo|"to do"|"a faire"|"à faire")      plane_state="Todo" ;;
       ready)                                 plane_state="Ready" ;;

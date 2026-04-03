@@ -548,10 +548,12 @@ $(echo "$TEST_OUTPUT" | tail -20)
     jira_add_rich_comment "$TICKET_KEY" "rami" "WARNING" "## Merge Conflicts
 PR: ${PR_URL}
 
-Has merge conflicts with ${BASE_BRANCH}. Sending back to Youssef to rebase."
+Has merge conflicts with ${BASE_BRANCH}. Sending back to Youssef to rebase." || true
     jira_update_labels "$TICKET_KEY" "agent:rami" "agent:youssef"
+    jira_transition "$TICKET_KEY" "in progress" || true
+    plane_set_assignee "$TICKET_KEY" "youssef" 2>/dev/null || true
     increment_retry "$TICKET_KEY" "youssef"
-    slack_notify "*$(mm_ticket_link "${TICKET_KEY}")* — PR #${PR_NUMBER} en conflit avec master. $(mm_mention youssef), un rebase s'impose." "pipeline" "warning"
+    slack_notify "*$(mm_ticket_link "${TICKET_KEY}")* — PR #${PR_NUMBER} en conflit avec master. $(mm_mention youssef), un rebase s'impose." "pipeline" "warning" || true
     log_activity "rami" "$TICKET_KEY" "CONFLICT" "PR has merge conflicts, sent to Youssef"
     exit 0
 
