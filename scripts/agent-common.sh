@@ -1256,11 +1256,13 @@ with open(path, 'w') as f:
 is_agent_over_budget() {
   local agent="$1"
   local share="${AGENT_BUDGET_SHARE[$agent]:-10}"
+  local daily_limit="${COST_BUDGET_DAILY:-100}"
 
   python3 -c "
 import json, sys, os
 agent = sys.argv[1]
 share = int(sys.argv[2])
+daily_limit = int(sys.argv[3])
 path = '${AGENT_BUDGET_FILE}'
 
 try:
@@ -1272,15 +1274,23 @@ except:
 total_calls = sum(d.get('calls', 0) for d in data.values())
 agent_calls = data.get(agent, {}).get('calls', 0)
 
-if total_calls == 0:
-    sys.exit(1)  # not over budget
+# Absolute limit: agent can't exceed its share of the daily cap
+agent_abs_limit = int(daily_limit * share / 100)
+if agent_abs_limit > 0 and agent_calls >= agent_abs_limit:
+    print(f'{agent}: {agent_calls}/{agent_abs_limit} calls (absolute cap)')
+    sys.exit(0)  # over budget
+
+# Percentage throttle only kicks in after 10+ total calls across all agents
+# (avoids false positives when only one agent is active early in the day)
+if total_calls < 10:
+    sys.exit(1)  # not enough data to throttle
 
 agent_pct = agent_calls * 100 / total_calls
 if agent_pct > share * 1.5:  # 50% over share → throttle
     print(f'{agent}: {agent_pct:.0f}% of calls (budget: {share}%)')
     sys.exit(0)  # over budget
 sys.exit(1)
-" "$agent" "$share" 2>/dev/null
+" "$agent" "$share" "$daily_limit" 2>/dev/null
   return $?
 }
 
