@@ -1280,9 +1280,9 @@ if agent_abs_limit > 0 and agent_calls >= agent_abs_limit:
     print(f'{agent}: {agent_calls}/{agent_abs_limit} calls (absolute cap)')
     sys.exit(0)  # over budget
 
-# Percentage throttle only kicks in after 10+ total calls across all agents
-# (avoids false positives when only one agent is active early in the day)
-if total_calls < 10:
+# Percentage throttle only kicks in after enough calls from 3+ agents
+# (avoids false positives when only 1-2 agents are active)
+if total_calls < 30:
     sys.exit(1)  # not enough data to throttle
 
 agent_pct = agent_calls * 100 / total_calls
