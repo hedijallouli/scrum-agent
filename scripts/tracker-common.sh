@@ -424,10 +424,11 @@ requests.patch(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/{issue_id}/
   # Override jira_add_comment → Plane comment (markdown, much simpler!)
   jira_add_comment() {
     local key="$1" message="$2"
+    local seq_num="${key##*-}"
     local issue_id
-    issue_id=$(plane_api GET "/api/v1/workspaces/${PLANE_WS}/projects/${PLANE_PID}/issues/?search=${key}" 2>/dev/null \
-      | python3 -c "import json,sys; d=json.load(sys.stdin); r=d.get('results',[d]); print(r[0]['id'] if r else '')" 2>/dev/null)
-    [[ -z "$issue_id" ]] && return 1
+    issue_id=$(plane_api GET "/api/v1/workspaces/${PLANE_WS}/projects/${PLANE_PID}/issues/?per_page=200" 2>/dev/null \
+      | python3 -c "import json,sys; d=json.load(sys.stdin); r=d.get('results',[]); seq=int(sys.argv[1]); i=next((x for x in r if x.get('sequence_id')==seq),None); print(i['id'] if i else '')" "$seq_num" 2>/dev/null)
+    [[ -z "$issue_id" ]] && return 0  # graceful no-op if not found
 
     local body
     body=$(python3 -c "
