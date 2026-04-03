@@ -601,6 +601,7 @@ Waiting for Hedi's response via Slack. QA review will continue regardless."
 fi
 
 # ─── 9. Act on verdict ───────────────────────────────────────────────────────
+set -x  # DEBUG: trace verdict handling
 if [[ "$VERDICT" == "PASS" ]]; then
   # ─── PASS: Forward to Rami for DevOps checks + merge ────────────────────
   log_info "QA PASSED — forwarding to Rami (DevOps)"
