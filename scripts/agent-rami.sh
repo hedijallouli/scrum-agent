@@ -430,7 +430,7 @@ fi
 
 # Check 3: No console.log statements
 log_info "Check: No console.log..."
-CONSOLE_LOGS=$(git diff "${BASE_BRANCH}...origin/${PR_BRANCH}" -- '*.ts' '*.tsx' '*.js' '*.jsx' 2>/dev/null | grep '^\+.*console\.\(log\|debug\|info\)' | grep -v '// eslint-disable' || true)
+CONSOLE_LOGS=$(git diff "${BASE_BRANCH}...origin/${PR_BRANCH}" -- '*.ts' '*.tsx' '*.js' '*.jsx' 2>/dev/null | grep '^\+.*console\.\(log\|debug\|info\)' | grep -v '// eslint-disable' | grep -v '^\+\s*//' | grep -v '^\+\s*\*' || true)
 if [[ -n "$CONSOLE_LOGS" ]]; then
   add_issue "QUALITY: console.log statements found in new code"
   CHECKS_PASSED=false
@@ -455,7 +455,7 @@ fi
 
 # Check 6: PR size hard limit (300 lines, aligned with Nadia's QA limit)
 log_info "Check: PR size hard limit (300 lines)..."
-TOTAL_DIFF=$(git diff "${BASE_BRANCH}...origin/${PR_BRANCH}" --shortstat 2>/dev/null \
+TOTAL_DIFF=$(git diff "${BASE_BRANCH}...origin/${PR_BRANCH}" --shortstat -- ':!package-lock.json' ':!yarn.lock' ':!pnpm-lock.yaml' 2>/dev/null \
   | { grep -oE '[0-9]+ insertion|[0-9]+ deletion' || true; } \
   | awk '{s+=$1}END{print s+0}')
 TOTAL_DIFF="${TOTAL_DIFF:-0}"
