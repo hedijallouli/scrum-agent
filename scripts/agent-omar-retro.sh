@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# ─── BISB Omar Retro-Action Agent ──────────────────────────────────────────
+# ─── Omar Retro-Action Agent ──────────────────────────────────────────────
 # Writes ops/monitoring perspective on retro-action tickets
 # Pattern: Haiku, 1 turn, no tools → comment → hand to Salma
 

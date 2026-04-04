@@ -10,7 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/agent-common.sh"
 
-TICKET_KEY="${1:?Usage: agent-karim.sh BISB-XX}"
+TICKET_KEY="${1:?Usage: agent-karim.sh ${PROJECT_KEY:-TICKET}-XX}"
 MAX_RETRIES=3
 
 init_log "$TICKET_KEY" "karim"
@@ -53,7 +53,7 @@ if echo "$LABELS" | grep -q "retro-action" 2>/dev/null; then
     COMMENTS=$(jira_get_comments "$TICKET_KEY")
 
     # Karim has no Claude call normally, but for retro-action comments we use Haiku
-    RETRO_PROMPT="You are Karim, the DevOps agent for BisB (Business is Business).
+    RETRO_PROMPT="You are Karim, the DevOps agent for ${PROJECT_NAME} (${PROJECT_KEY}).
 
 TICKET: ${TICKET_KEY}
 TITLE: ${SUMMARY}
@@ -74,7 +74,7 @@ Do NOT run any checks. Instead, write a concise comment (max 300 words) covering
 IMPORTANT: Consider your own constraints:
 - You run ONLY automated diff-based checks (no Claude, no file reading)
 - You check for: .env files, hardcoded secrets, console.log, PR size, dangerous operations
-- BisB uses npm workspaces (packages/engine + packages/web), Vitest for tests
+- Check project's CLAUDE.md for tech stack details (npm workspaces, test framework, etc.)
 - Any new checks must be implementable as grep/diff patterns in agent-karim.sh
 
 Output ONLY the comment text — no preamble, no markdown headers."
@@ -312,7 +312,7 @@ if [[ "$CHECKS_PASSED" == "true" ]]; then
   log_info "Running engine tests..."
   cd "$PROJECT_DIR"
   git fetch origin "$PR_BRANCH" 2>/dev/null
-  TEST_OUTPUT=$(npm test --workspace=@bisb/engine 2>&1) || {
+  TEST_OUTPUT=$(npm test 2>&1) || {
     log_info "Engine tests failed — sending back to Youssef"
     write_feedback "$TICKET_KEY" "karim" "TESTS_FAILED" "Engine tests failed:\n${TEST_OUTPUT}"
     jira_add_rich_comment "$TICKET_KEY" "karim" "FAIL" "## Engine Tests Failed
@@ -367,7 +367,7 @@ PR #${PR_NUMBER} not yet mergeable (status: ${MERGE_STATUS}). Waiting for checks
 
   # Status is MERGEABLE — proceed with merge
   # Clean up worktree before merge (Youssef creates these, they block --delete-branch)
-    WORKTREE_BASE="/opt/bisb-worktrees"
+    WORKTREE_BASE="${WORKTREE_BASE:-/tmp/${PROJECT_PREFIX}-worktrees}"
     for wt_dir in "${WORKTREE_BASE}"/feature/*; do
       [[ -d "$wt_dir" ]] || continue
       wt_branch=$(basename "$wt_dir")

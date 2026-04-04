@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-# ─── BISB Layla Weekly Report ──────────────────────────────────────────────
-# Runs every Monday — Sprint progress + Board game market intelligence
+# ─── Layla Weekly Report ──────────────────────────────────────────────────
+# Runs every Monday — Sprint progress + market intelligence
 # Uses Sonnet with WebSearch/WebFetch for market research
 
 AGENT_NAME="layla-weekly"
@@ -43,22 +43,18 @@ LATEST_DAILY=$(cat /tmp/${PROJECT_PREFIX}-layla-latest-report.md 2>/dev/null || 
 HEDI_MESSAGES=$(get_hedi_messages 2>/dev/null || echo "No recent messages from Hedi.")
 
 # ─── Get recent activity logs ───────────────────────────────────────────────
-RECENT_ACTIVITY=$(tail -50 /opt/bisb/n8n/logs/activity.log 2>/dev/null || echo "No activity logs.")
+RECENT_ACTIVITY=$(tail -50 ${LOG_DIR}/activity.log 2>/dev/null || echo "No activity logs.")
 
 # ─── Generate weekly report ──────────────────────────────────────────────────
-MARKET_ROLE=$(cat "${SCRIPT_DIR}/../ai/product-marketing.md" 2>/dev/null || echo "You are Layla, Product & Market Strategist for BISB.")
+MARKET_ROLE=$(cat "${SCRIPT_DIR}/../ai/product-marketing.md" 2>/dev/null || echo "You are Layla, the Product & Market Strategist for ${PROJECT_NAME} (${PROJECT_KEY}).")
 
 WEEKLY_REPORT=$(claude -p --model sonnet --max-turns 15 --allowedTools "WebSearch WebFetch" "
 ${MARKET_ROLE}
 
-Generate a WEEKLY REPORT for the BISB (Business is Business) digital board game project.
+Generate a WEEKLY REPORT for the ${PROJECT_NAME} (${PROJECT_KEY}) project.
 Today is $(date -u +%Y-%m-%d), Week ${WEEK_ID}.
 
-BISB is a digital implementation of a Tunisian board game by Zied Remadi, featuring:
-- Property trading, stock market, auctions, production chains
-- Casinos, football clubs, tombola, gangsters
-- TypeScript monorepo with game engine + React frontend
-- Currently in alpha testing phase
+Read your persona file for full project context.
 
 === SPRINT CONTEXT ===
 ${SPRINT_CONTEXT:-No active sprint data.}
@@ -88,7 +84,7 @@ Use WebSearch to research the LATEST trends (February 2026):
 - Competitor updates (Monopoly GO, Catan Universe, Board Game Arena, Tabletopia)
 - Mobile gaming monetization strategies relevant to board games
 - MENA/Tunisian gaming market developments
-- Opportunities for BISB differentiation
+- Opportunities for ${PROJECT_KEY} differentiation
 
 End with 3 actionable recommendations combining progress insights and market intelligence.
 
@@ -107,7 +103,7 @@ if [[ ${#WEEKLY_REPORT} -gt 3800 ]]; then
   TRUNCATED_REPORT+="\n\n_[Report truncated — full version saved]_"
 fi
 
-slack_notify "layla" "📊 *BISB Weekly Report — Week ${WEEK_ID}*\n\n${TRUNCATED_REPORT}"
+slack_notify "layla" "*${PROJECT_KEY} Weekly Report — Week ${WEEK_ID}*\n\n${TRUNCATED_REPORT}"
 
 # ─── Save report ─────────────────────────────────────────────────────────────
 echo "$WEEKLY_REPORT" > /tmp/${PROJECT_PREFIX}-layla-weekly-report.md

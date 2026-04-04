@@ -10,7 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/agent-common.sh"
 
-TICKET_KEY="${1:?Usage: agent-layla.sh BISB-XX}"
+TICKET_KEY="${1:?Usage: agent-layla.sh ${PROJECT_KEY:-TICKET}-XX}"
 MAX_RETRIES=2  # Validation gate — 2 tries max before escalating to human
 
 init_log "$TICKET_KEY" "layla"
@@ -88,7 +88,8 @@ if [[ "$IS_IDEATION" == "true" ]]; then
   log_info "Ideation model: ${MODEL}"
 
   # Build ideation prompt
-  IDEATION_PROMPT="You are Layla, Product Strategist for Business is Business (BisB) — a Tunisian board game being digitized.
+  IDEATION_PROMPT="You are Layla, the Product Strategist for ${PROJECT_NAME} (${PROJECT_KEY}).
+Read your persona file (ai/product-marketing.md) for full project context.
 
 TICKET: $TICKET_KEY
 SUMMARY: $SUMMARY
@@ -101,9 +102,9 @@ TASK: Propose exactly 10 distinct, creative concepts based on the ticket descrip
 For each concept, provide:
 1. **Name** — short, catchy name
 2. **Tagline** — one sentence pitch
-3. **Core Mechanic** — what makes it unique gameplay-wise
-4. **How it changes**: economy, player interaction, game length
-5. **Why it's fun** — reference BGA, Monopoly GO, competitive card games, or other modern games
+3. **Core Mechanic** — what makes it unique
+4. **How it changes**: the product, user interaction, workflow
+5. **Why it's good** — reference industry best practices or competitor examples
 6. **RICE Score** — Reach (1-10), Impact (1-10), Confidence (1-10), Effort (1-10 where 10=easy)
 
 Consider: timed turns, draft mechanics, objectives, asymmetric starts, elimination rounds, resource scarcity, team play, auction-only mode, speed runs, handicaps, catch-up mechanics, etc.
@@ -171,7 +172,7 @@ fi
 # ─── 6. Invoke Claude for feasibility validation ─────────────────────────────
 log_info "Invoking Claude (${MODEL}) for feasibility review..."
 
-CLAUDE_PROMPT="You are Layla, the Product Strategist for BisB (Business is Business), a digital version of the popular Tunisian board game created by Zied Remadi.
+CLAUDE_PROMPT="You are Layla, the Product Strategist for ${PROJECT_NAME} (${PROJECT_KEY}).
 Read the file ai/product-marketing.md for your complete rules and domain knowledge.
 
 TICKET: ${TICKET_KEY}

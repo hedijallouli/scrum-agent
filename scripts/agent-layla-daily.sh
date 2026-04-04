@@ -55,7 +55,8 @@ fi
 # ─── 2. Generate market intelligence report ──────────────────────────────────
 log_info "Invoking Claude (sonnet) for market intelligence..."
 
-REPORT_PROMPT="You are Layla, the Product Strategist for BisB (Business is Business), a digital version of the popular Tunisian board game.
+REPORT_PROMPT="You are Layla, the Product Strategist for ${PROJECT_NAME} (${PROJECT_KEY}).
+Read your persona file (ai/product-marketing.md) for full project context.
 Today is $(date +%Y-%m-%d).
 
 YOUR TASK — DAILY PRODUCT INTELLIGENCE REPORT:

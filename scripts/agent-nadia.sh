@@ -12,7 +12,7 @@ source "${SCRIPT_DIR}/agent-common.sh"
 # Override base branch: diff against dev, not master
 BASE_BRANCH="${BASE_BRANCH:-dev}"
 
-TICKET_KEY="${1:?Usage: agent-nadia.sh BISB-XX}"
+TICKET_KEY="${1:?Usage: agent-nadia.sh ${PROJECT_KEY:-TICKET}-XX}"
 MAX_RETRIES=2  # Cap at 2 — after 2 Nadia FAILs, escalate to human instead of ping-ponging
 
 init_log "$TICKET_KEY" "nadia"
@@ -73,7 +73,7 @@ if echo "$LABELS" | grep -q "retro-action" 2>/dev/null; then
 
     COMMENTS=$(jira_get_comments "$TICKET_KEY")
 
-    RETRO_PROMPT="You are Nadia, the QA agent for BisB (Business is Business).
+    RETRO_PROMPT="You are Nadia, the QA agent for ${PROJECT_NAME} (${PROJECT_KEY}).
 
 TICKET: ${TICKET_KEY}
 TITLE: ${SUMMARY}
@@ -268,7 +268,7 @@ fi
 # For test-only / docs-only / small-fix, skip the full 9-point QA checklist.
 # This saves 2-3x API cost and is appropriate for low-risk PRs.
 if [[ "$REVIEW_MODE" == "test-only" ]]; then
-  QA_RULES_HEADER="You are Nadia, the QA agent for BisB (Business is Business).
+  QA_RULES_HEADER="You are Nadia, the QA agent for ${PROJECT_NAME} (${PROJECT_KEY}).
 
 FAST-PATH REVIEW: TEST FILES ONLY — skip all code quality checks.
 Your ONLY job here is to verify the tests themselves are useful:
@@ -283,7 +283,7 @@ VERDICT: PASS_WITH_WARNINGS + WARNINGS: bullet list  (if tests could be improved
 VERDICT: FAIL + ISSUES: bullet list  (only if tests are fundamentally broken)"
 
 elif [[ "$REVIEW_MODE" == "docs-only" ]]; then
-  QA_RULES_HEADER="You are Nadia, the QA agent for BisB (Business is Business).
+  QA_RULES_HEADER="You are Nadia, the QA agent for ${PROJECT_NAME} (${PROJECT_KEY}).
 
 FAST-PATH REVIEW: DOCS/CONFIG FILES ONLY — skip all code checks.
 Your ONLY job is to verify the documentation is accurate and complete:
@@ -295,7 +295,7 @@ Your ONLY job is to verify the documentation is accurate and complete:
 Output a VERDICT: PASS / PASS_WITH_WARNINGS / FAIL with brief justification."
 
 elif [[ "$REVIEW_MODE" == "small-fix" ]]; then
-  QA_RULES_HEADER="You are Nadia, the QA agent for BisB (Business is Business).
+  QA_RULES_HEADER="You are Nadia, the QA agent for ${PROJECT_NAME} (${PROJECT_KEY}).
 
 FAST-PATH REVIEW: SMALL FIX (${CODE_DIFF_SIZE} lines) — abbreviated check.
 Focus only on:
@@ -309,7 +309,7 @@ Output a VERDICT: PASS / PASS_WITH_WARNINGS / FAIL with brief justification."
 else
 # ─── Standard full prompt (unchanged) ─────────────────────────────────────
 # Always inline QA rules — never let Claude waste turns reading files
-QA_RULES_HEADER="You are Nadia, the QA agent for BisB (Business is Business).
+QA_RULES_HEADER="You are Nadia, the QA agent for ${PROJECT_NAME} (${PROJECT_KEY}).
 
 QA CHECKLIST — PRE-PR VERIFICATION (zero-rejection target)
 These checks prevent 95% of historical QA failures. Review EVERY item:
@@ -408,7 +408,7 @@ When the spec includes a '## CI Validation' section, verify against these automa
 • TypeScript: 'tsc --noEmit passes with 0 errors, no any types' (verified by Youssef pre-PR)
 • Build: 'npm run build succeeds without warnings' (verified by Youssef pre-PR)
 • Lint: 'npm run lint passes ESLint rules' (verified by Youssef pre-PR)
-• Security: 'Game tests pass: npm test --workspace=@bisb/engine' (Rami automated check)
+• Security: 'Tests pass: npm test' (Rami automated check)
 • Security: 'No hardcoded secrets' (Rami automated grep check)
 • Line Limits: 'No file >200 lines, PR <250 lines total' (Rami automated check)
 • DevOps: 'DevOps approval required for database/RLS/auth/config changes' (Rami review flag)

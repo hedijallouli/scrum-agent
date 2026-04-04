@@ -8,7 +8,7 @@
 # Storage:
 #   Last poll timestamp: /var/lib/${PROJECT_PREFIX}/data/agents/AGENT/last-dm-poll.txt
 #
-# Cron: */2 * * * * /opt/bisb-scripts/agent-dm-poller.sh >> ${LOG_DIR}/dm-poller.log 2>&1
+# Cron: */2 * * * * /path/to/agent-dm-poller.sh >> ${LOG_DIR}/dm-poller.log 2>&1
 # =============================================================================
 set -euo pipefail
 

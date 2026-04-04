@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/agent-common.sh"
 
-TICKET_KEY="${1:?Usage: agent-salma.sh BISB-XX}"
+TICKET_KEY="${1:?Usage: agent-salma.sh ${PROJECT_KEY:-TICKET}-XX}"
 MAX_RETRIES=3  # Allow retries for complex specs before blocking
 
 init_log "$TICKET_KEY" "salma"
@@ -70,7 +70,8 @@ if printf "%s\n" "$LABELS" | grep -q "ideation-ready"; then
   # Fetch latest comments to get Layla's concepts
   LATEST_COMMENTS=$(jira_get_comments "$TICKET_KEY" 2>/dev/null || echo "")
 
-  PICKER_PROMPT="You are Salma, the Product Manager for Business is Business (BisB) -- a Tunisian board game being digitized.
+  PICKER_PROMPT="You are Salma, the Product Manager for ${PROJECT_NAME} (${PROJECT_KEY}).
+Read your persona file (ai/pm.md) for full project context.
 
 TICKET: $TICKET_KEY
 SUMMARY: $SUMMARY
@@ -83,7 +84,7 @@ $LATEST_COMMENTS
 TASK: Layla (Product Strategist) has proposed 10 concepts above. Your job is to:
 
 1. EVALUATE each concept against these criteria:
-   - Alignment with BisB's core identity (Tunisian board game, economic/business theme)
+   - Alignment with the project's core identity and goals
    - Player engagement and fun factor
    - Implementation feasibility (we have a React/TypeScript codebase)
    - Uniqueness vs existing game modes
@@ -169,7 +170,8 @@ if printf '%s\n' "$LABELS" | grep -q "architecture-ready"; then
   # Fetch latest comments to get Rami's architecture recommendation
   LATEST_COMMENTS=$(jira_get_comments "$TICKET_KEY" 2>/dev/null || echo "")
   
-  SPEC_PROMPT="You are Salma, the Product Manager for Business is Business (BisB) — a Tunisian board game being digitized.
+  SPEC_PROMPT="You are Salma, the Product Manager for ${PROJECT_NAME} (${PROJECT_KEY}).
+Read your persona file (ai/pm.md) for full project context.
 
 TICKET: $TICKET_KEY
 SUMMARY: $SUMMARY
@@ -266,7 +268,7 @@ if printf "%s\n" "$LABELS" | grep -qE "needs-split|needs-refinement-split"; then
   FAILURE_HISTORY=$(jira_get_comments "$TICKET_KEY" | { grep -A5 "Nadia\|Youssef\|FAIL\|BLOCKED\|ESCALAT" || true; } | tail -60 || true)
   FEEDBACK_ISSUES=$(cat "${FEEDBACK_DIR}/${TICKET_KEY}.txt" 2>/dev/null || echo "No feedback file")
 
-  SPLIT_PROMPT="You are Salma, the PM agent for BisB (Business is Business).
+  SPLIT_PROMPT="You are Salma, the PM agent for ${PROJECT_NAME} (${PROJECT_KEY}).
 Read the file ai/pm.md for your PM rules.
 
 TICKET: ${TICKET_KEY}
@@ -505,7 +507,7 @@ fi
 # ─── 5. Invoke Claude Code for spec writing ──────────────────────────────────
 log_info "Invoking Claude Code (${MODEL}) for spec enrichment..."
 
-CLAUDE_PROMPT="You are Salma, the PM agent for BisB (Business is Business).
+CLAUDE_PROMPT="You are Salma, the PM agent for ${PROJECT_NAME} (${PROJECT_KEY}).
 Read the file ai/pm.md for your complete rules and output format.
 
 TICKET: ${TICKET_KEY}
@@ -524,7 +526,7 @@ YOUR TASK:
    - Check src/ directory structure
    - Look at existing patterns in similar files
 4. RESEARCH PHASE — Use WebSearch and WebFetch to gather context:
-   - If the ticket involves specific game rules or mechanics, research the original BisB board game rules
+   - If the ticket involves specific domain rules or mechanics, research the relevant domain context
    - If the ticket involves a specific API or library, research documentation and best practices
    - If the ticket involves a UI pattern, research common implementations
    - Summarize key findings in the Notes section of your spec
@@ -572,7 +574,7 @@ IMPORTANT:
 - **ALL tickets MUST have a story point estimate** (see ai/STORY_POINTS.md for reference examples)
 - Compare to reference examples when estimating (e.g., typo fix = 1 pt, new API endpoint = 5 pts)
 - Do NOT write code — only write the specification
-- Do NOT invent game rules — always reference BisB/Regle du jeu BISB.pdf
+- Do NOT invent domain rules — always reference the project's domain documentation
 ${LAYLA_CONTEXT}${HEDI_CONTEXT}${STANDUP_CONTEXT}
 $(if printf "%s\n" "$LABELS" | grep -q "retro-action" 2>/dev/null; then echo "
 RETRO ACTION ITEM — INTEGRATION POINTS REQUIRED:

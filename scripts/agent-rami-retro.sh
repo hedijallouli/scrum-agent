@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-# ─── BISB Rami Retro-Action Agent ──────────────────────────────────────────
+# ─── Rami Retro-Action Agent ──────────────────────────────────────────────
 # Writes architecture perspective on retro-action tickets
 
 AGENT_NAME="rami-retro"
@@ -27,11 +27,7 @@ CLAUDE_OUTPUT=$(claude -p --model haiku --max-turns 1  "
 ${ARCH_ROLE}
 
 You are writing an ARCHITECTURE PERSPECTIVE comment for a retro-action ticket.
-This is a digital board game project (Business is Business - BISB) built with:
-- TypeScript monorepo (packages/engine + packages/web)
-- Game engine: framework-agnostic, command pattern, event sourcing
-- Frontend: React 19 + Vite + TailwindCSS + Zustand
-- Testing: Vitest
+Read your persona file for full project context and tech stack details.
 
 TICKET: $TICKET_KEY
 SUMMARY: $SUMMARY

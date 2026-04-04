@@ -125,7 +125,7 @@ fi
 echo "Guardrail 5/8: Running TypeScript typecheck..."
 
 BUILD_EXIT=0
-npm run build --workspace=@bisb/engine 2>/dev/null || BUILD_EXIT=$?
+npm run build 2>/dev/null || BUILD_EXIT=$?
 if [[ "$BUILD_EXIT" -ne 0 ]]; then
   add_violation "HIGH" "typecheck" "TypeScript build failed (exit ${BUILD_EXIT})"
 fi
@@ -134,7 +134,7 @@ fi
 echo "Guardrail 6/8: Running tests..."
 
 TEST_EXIT=0
-npm test --workspace=@bisb/engine 2>/dev/null || TEST_EXIT=$?
+npm test 2>/dev/null || TEST_EXIT=$?
 if [[ "$TEST_EXIT" -ne 0 ]]; then
   add_violation "HIGH" "tests" "Tests failed (exit ${TEST_EXIT})"
 fi

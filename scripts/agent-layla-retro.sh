@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-# ─── BISB Layla Retro-Action Agent ──────────────────────────────────────────
-# Writes game/market perspective on retro-action tickets
+# ─── Layla Retro-Action Agent ──────────────────────────────────────────────
+# Writes product/market perspective on retro-action tickets
 
 AGENT_NAME="layla-retro"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,10 +26,8 @@ MARKET_ROLE=$(cat "${SCRIPT_DIR}/../ai/product-marketing.md" 2>/dev/null || echo
 CLAUDE_OUTPUT=$(claude -p --model haiku --max-turns 1  "
 ${MARKET_ROLE}
 
-You are writing a GAME/MARKET PERSPECTIVE comment for a retro-action ticket.
-This is 'Business is Business' (BISB) - a Tunisian board game by Zied Remadi being digitized.
-The game features: property trading, stock market, auctions, production chains, casinos, football clubs.
-Competitors: Monopoly GO, Catan Universe, Tabletopia, Board Game Arena.
+You are writing a PRODUCT/MARKET PERSPECTIVE comment for a retro-action ticket.
+Read your persona file for full project context.
 
 TICKET: $TICKET_KEY
 SUMMARY: $SUMMARY

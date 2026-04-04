@@ -549,7 +549,7 @@ slack_notify() {
 
   # Resolve agent identity (strip ticket suffix for nadia-PROJ-XX)
   local agent_base="${AGENT_NAME%%-${PROJECT_KEY}*}"
-  local username="${AGENT_SLACK_USERNAME[$agent_base]:-BisB Bot}"
+  local username="${AGENT_SLACK_USERNAME[$agent_base]:-${PROJECT_KEY:-Agent} Bot}"
   local emoji="${AGENT_SLACK_EMOJI[$agent_base]:-:robot_face:}"
   local avatar="${AGENT_SLACK_AVATAR[$agent_base]:-}"
   local title="${AGENT_JOB_TITLE[$agent_base]:-}"

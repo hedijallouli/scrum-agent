@@ -277,7 +277,8 @@ for issue in issues:
         requests.patch(
             f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/{iid}/',
             headers=h, json={'assignees': [HEDI_ID]}, timeout=10)
-    print(f'BISB-{seq}|{name}')
+    pkey = os.environ.get('PROJECT_KEY', 'BISB')
+    print(f'{pkey}-{seq}|{name}')
 NHPYEOF
   local nh_tickets
   nh_tickets=$(python3 "$_nh_script" 2>/dev/null || echo "")
@@ -470,7 +471,8 @@ for issue in issues:
         headers=h, json={'assignees': [OMAR_ID]}, timeout=10)
     if r2.status_code in (200, 201):
         seq = issue.get('sequence_id','?')
-        results.append(f'BISB-{seq}')
+        pkey = os.environ.get('PROJECT_KEY', 'BISB')
+        results.append(f'{pkey}-{seq}')
 if results:
     print(' '.join(results))
 PYEOF
@@ -571,7 +573,7 @@ count_active_wip() {
   local count=0
   local now
   now=$(date +%s)
-  for lf in /tmp/${PROJECT_PREFIX}-agent-${agent}-BISB-*.lock /tmp/${PROJECT_PREFIX}-agent-${agent}-${PROJECT_KEY}-*.lock; do
+  for lf in /tmp/${PROJECT_PREFIX}-agent-${agent}-${PROJECT_KEY}-*.lock; do
     [[ -f "$lf" ]] || continue
     local mtime
     mtime=$(stat -c %Y "$lf" 2>/dev/null || stat -f %m "$lf" 2>/dev/null || echo 0)
@@ -920,7 +922,7 @@ generate_cycle_summary() {
   local LOG_SNIPPETS=""
   local cutoff
   cutoff=$(date -u -d '20 minutes ago' +%s 2>/dev/null || date -u -v-20M +%s 2>/dev/null || echo 0)
-  for lf in ${LOG_DIR}/BISB-*-*.log; do
+  for lf in ${LOG_DIR}/${PROJECT_KEY}-*-*.log; do
     [[ -f "$lf" ]] || continue
     local mtime
     mtime=$(stat -c %Y "$lf" 2>/dev/null || stat -f %m "$lf" 2>/dev/null || echo 0)

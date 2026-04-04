@@ -7,7 +7,7 @@
 #   - Live Plane board context (real status, blocked tickets, progress)
 #   - DM conversation memory (last 10 exchanges per agent)
 #   - Agent mood system (sprint health → tone variation)
-#   - Cross-ticket context (any BISB-XX → live Plane fetch)
+#   - Cross-ticket context (any TICKET-XX → live Plane fetch)
 #   - Natural language command detection + confirmation workflow
 #   - Short responses (1-2 sentences)
 #   - @mentions of teammates when relevant
@@ -46,7 +46,7 @@ if [[ "$AGENT_VALID" == "false" ]]; then
 fi
 
 # ─── Agent config ─────────────────────────────────────────────────────────────
-AI_DIR="${PROJECT_DIR:-/opt/bisb}/ai"
+AI_DIR="${PROJECT_DIR}/ai"
 case "$AGENT_NAME" in
   salma)   PERSONA_FILE="${AI_DIR}/pm.md";               ROLE="Product Manager" ;;
   youssef) PERSONA_FILE="${AI_DIR}/dev.md";              ROLE="Développeur" ;;
@@ -58,7 +58,7 @@ esac
 
 PERSONA=""
 [[ -f "$PERSONA_FILE" ]] && PERSONA=$(head -80 "$PERSONA_FILE" 2>/dev/null || true)
-[[ -z "$PERSONA" ]] && PERSONA="Tu es ${AGENT_NAME^}, ${ROLE} de l'équipe BisB."
+[[ -z "$PERSONA" ]] && PERSONA="Tu es ${AGENT_NAME^}, ${ROLE} de l'équipe ${PROJECT_KEY}."
 
 AGENT_CAP="${AGENT_NAME^}"
 AGENT_DATA_DIR="${DATA_DIR:-/var/lib/${PROJECT_PREFIX}/data}/agents/${AGENT_NAME}"
@@ -113,11 +113,12 @@ log_info "Detected language: ${DETECTED_LANG}"
 
 # ─── 2. Live Plane board context ──────────────────────────────────────────────
 log_info "Fetching live Plane context..."
-LIVE_CONTEXT=$(python3 - "$AGENT_NAME" << 'PYEOF' 2>/dev/null || echo "Impossible de récupérer le contexte Plane.")
+LIVE_CONTEXT=$(python3 - "$AGENT_NAME" "${PROJECT_KEY:-BISB}" << 'PYEOF' 2>/dev/null || echo "Impossible de récupérer le contexte Plane.")
 import os, sys, requests
 from datetime import datetime, timezone
 
 agent_name = sys.argv[1]
+project_key = sys.argv[2] if len(sys.argv) > 2 else "BISB"
 base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
 ws   = os.environ.get('PLANE_WORKSPACE_SLUG','')
 pid  = os.environ.get('PLANE_PROJECT_ID','')
@@ -166,18 +167,18 @@ try:
         label_ids = issue.get('label_ids', [])
         is_blocked = blocked_id and blocked_id in label_ids
 
-        key_str = f"BISB-{seq} ({', '.join(assignees) or 'non assigné'})"
+        key_str = f"{project_key}-{seq} ({', '.join(assignees) or 'non assigné'})"
         by_state.setdefault(sname, []).append(key_str)
 
         if agent_name in assignees:
-            my_tickets.append(f"BISB-{seq}: {name}")
+            my_tickets.append(f"{project_key}-{seq}: {name}")
 
         if is_blocked:
-            blocked_tickets.append(f"BISB-{seq} ({', '.join(assignees) or '?'})")
+            blocked_tickets.append(f"{project_key}-{seq} ({', '.join(assignees) or '?'})")
 
         for a in assignees:
             if a in by_agent:
-                by_agent[a].append(f"BISB-{seq}")
+                by_agent[a].append(f"{project_key}-{seq}")
 
     lines = ["=== ÉTAT DU BOARD EN TEMPS RÉEL ==="]
     for sname, tickets in sorted(by_state.items()):
@@ -199,7 +200,7 @@ PYEOF
 
 log_info "Live context fetched (${#LIVE_CONTEXT} chars)"
 
-# ─── 3. Specific ticket context (if BISB-XX mentioned) ───────────────────────
+# ─── 3. Specific ticket context (if TICKET-XX mentioned) ────────────────────
 MENTIONED_TICKET=$(echo "$MESSAGE_TEXT" | grep -oE "${PROJECT_KEY:-BISB}-[0-9]+" | head -1 || echo "")
 TICKET_DETAIL=""
 if [[ -n "$MENTIONED_TICKET" ]]; then
@@ -244,7 +245,7 @@ import re
 
 # Count retry files (stuck tickets)
 import glob
-retries = glob.glob('/tmp/${PROJECT_PREFIX}-retries/BISB-*')
+retries = glob.glob('/tmp/*-retries/*-*')
 counts = []
 for f in retries:
     try:
@@ -307,10 +308,11 @@ ACTION_TICKET=""
 ACTION_AGENT=""
 
 if [[ "$IS_CONFIRMATION" == "false" ]]; then
-  PARSED=$(python3 - "$MESSAGE_TEXT" "$MENTIONED_TICKET" "$AGENT_NAME" << 'PYEOF' 2>/dev/null || echo "none|||")
+  PARSED=$(python3 - "$MESSAGE_TEXT" "$MENTIONED_TICKET" "$AGENT_NAME" "${PROJECT_KEY:-BISB}" << 'PYEOF' 2>/dev/null || echo "none|||")
 import sys, re
 msg = sys.argv[1].lower()
 mentioned = sys.argv[2]
+project_key = sys.argv[4] if len(sys.argv) > 4 else "BISB"
 
 action = "none"
 ticket = mentioned
@@ -366,8 +368,8 @@ if action == "none":
 
 # Extract ticket if not already found
 if not ticket:
-    m = re.search(r'bisb-(\d+)', msg)
-    if m: ticket = f"BISB-{m.group(1)}"
+    m = re.search(rf'{project_key.lower()}-(\d+)', msg)
+    if m: ticket = f"{project_key}-{m.group(1)}"
 
 print(f"{action}|{ticket}|{agent_target}")
 PYEOF
@@ -523,7 +525,7 @@ PYEOF
     [[ -z "$CONVERSATION_CONTEXT_FOR_SPEC" ]] && CONVERSATION_CONTEXT_FOR_SPEC="Contexte: ${MESSAGE_TEXT}"
 
     # Generate ticket spec via Haiku
-    TICKET_SPEC=$(claude -p --model claude-haiku-4-5 --max-turns 1 "Tu es Layla, Product Marketing expert du jeu BisB (Business is Business), un jeu de plateau tunisien numérique.
+    TICKET_SPEC=$(claude -p --model claude-haiku-4-5 --max-turns 1 "Tu es Layla, Product Marketing expert pour ${PROJECT_NAME} (${PROJECT_KEY}). Lis ton fichier persona pour le contexte projet.
 
 Hedi te demande de créer un ticket Plane basé sur la discussion suivante :
 
@@ -535,7 +537,7 @@ Génère une spec de ticket concise en format :
 **Titre**: [titre court et précis]
 **Type**: [Feature / Bug / UX / Content]
 **Résumé**: [1-2 phrases décrivant ce qui doit être fait]
-**Valeur joueur**: [pourquoi c'est important pour l'expérience BisB]
+**Valeur utilisateur**: [pourquoi c'est important pour le projet]
 **Critères d'acceptation**:
 - [ ] ...
 - [ ] ...
@@ -588,13 +590,14 @@ else: print(msg[:800])
   if [[ -n "$TICKET_TITLE" ]]; then
     log_info "Salma creating delegated ticket: ${TICKET_TITLE}"
     # Create ticket in Plane via API
-    CREATED_TICKET=$(python3 - "$TICKET_TITLE" "$TICKET_DESCRIPTION" << 'PYEOF' 2>/dev/null || echo "")
+    CREATED_TICKET=$(python3 - "$TICKET_TITLE" "$TICKET_DESCRIPTION" "${PROJECT_KEY:-BISB}" << 'PYEOF' 2>/dev/null || echo "")
 import os, sys, requests, json
 title = sys.argv[1]
 desc = sys.argv[2]
-base = "http://49.13.225.201:8090"
-ws   = "bisb"
-pid  = "c52b76e9-6592-49d0-a856-fd01fec3e6cd"
+project_key = sys.argv[3] if len(sys.argv) > 3 else "BISB"
+base = os.environ.get("PLANE_BASE_URL", "http://49.13.225.201:8090").rstrip("/")
+ws   = os.environ.get("PLANE_WORKSPACE_SLUG", "bisb")
+pid  = os.environ.get("PLANE_PROJECT_ID", "")
 key  = os.environ.get("PLANE_API_KEY","")
 h    = {"X-API-Key": key, "Content-Type": "application/json"}
 # Get Todo state
@@ -610,7 +613,7 @@ r = requests.post(f"{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/", heade
 if r.ok:
     d = r.json()
     seq = d.get("sequence_id","?")
-    print(f"BISB-{seq}")
+    print(f"{project_key}-{seq}")
 else:
     print("")
 PYEOF
@@ -705,7 +708,7 @@ SALMA_INSTR=""
 
 # Build prompt via heredoc (unquoted = allows $expansions, ' is literal, no bash quoting issues)
 HAIKU_PROMPT=$(cat << HAIKU_EOF
-Tu joues ${AGENT_CAP} (${ROLE}) dans une simulation d'equipe Agile pour le projet BisB.
+Tu joues ${AGENT_CAP} (${ROLE}) dans une equipe Agile pour le projet ${PROJECT_NAME} (${PROJECT_KEY}).
 
 ## Ton personnage
 ${PERSONA}

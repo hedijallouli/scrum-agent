@@ -13,7 +13,7 @@ source "${SCRIPT_DIR}/agent-common.sh"
 # Override base branch: PRs target dev, not master
 BASE_BRANCH="${BASE_BRANCH:-dev}"
 
-TICKET_KEY="${1:?Usage: agent-youssef.sh BISB-XX}"
+TICKET_KEY="${1:?Usage: agent-youssef.sh ${PROJECT_KEY:-TICKET}-XX}"
 MAX_RETRIES=3
 
 init_log "$TICKET_KEY" "youssef"
@@ -123,7 +123,7 @@ if echo "$LABELS" | grep -q "retro-action" 2>/dev/null; then
   if ! echo "$LABELS" | grep -q "enriched" 2>/dev/null; then
     log_info "Retro-action ticket — writing dev perspective comment and handing to Salma"
 
-    RETRO_PROMPT="You are Youssef, the Dev agent for BisB (Business is Business).
+    RETRO_PROMPT="You are Youssef, the Dev agent for ${PROJECT_NAME} (${PROJECT_KEY}).
 Read the file ai/dev.md for your complete rules.
 
 TICKET: ${TICKET_KEY}
@@ -462,7 +462,7 @@ feat(${TICKET_KEY}): ${SHORT_SUMMARY}
 Implemented by Youssef (AI Dev Agent)
 Ticket: ${TICKET_KEY}
 
-Co-Authored-By: Youssef (AI) <youssef@bisb.ai>
+Co-Authored-By: Youssef (AI) <youssef@${PROJECT_KEY,,}.ai>
 EOF
 )" 2>&1 >> "$LOG_FILE" || {
   log_info "Nothing new to commit (Claude may have committed already)"
@@ -524,7 +524,7 @@ else
   # Auto-detect DevOps review flags from changed files
   CHANGED_FILES=$(cd "$PROJECT_DIR" && git diff "${BASE_BRANCH}...HEAD" --name-only 2>/dev/null || true)
   DR_DB=" "; DR_AUTH=" "; DR_CONFIG=" "; DR_DEPLOY=" "; DR_SECURITY=" "; DR_THIRDPARTY=" "
-  # No database in BisB - skip DB detection
+  # DB detection skipped — enable per-project if needed
   echo "$CHANGED_FILES" | grep -qiE 'auth|rls|permission|policy' 2>/dev/null && DR_AUTH="x"
   echo "$CHANGED_FILES" | grep -qE '\.env|config' 2>/dev/null && DR_CONFIG="x"
   echo "$CHANGED_FILES" | grep -qiE 'nginx|systemd|deploy|Dockerfile' 2>/dev/null && DR_DEPLOY="x"
