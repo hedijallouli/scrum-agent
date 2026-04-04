@@ -41,7 +41,7 @@ if (( DEGRADE_LEVEL > 0 )); then
   log_info "Degradation active: level ${DEGRADE_LEVEL} — $(degrade_status 2>/dev/null || true)"
 fi
 
-# ─── Work Hours: 09:00–21:00 Tunis time (UTC+1), Mon–Fri ────────────────────
+# ─── Work Hours: 09:00–21:00 Tunis time (UTC+1), Mon–Sun ────────────────────
 # Tunis is always UTC+1 (no DST since 2008)
 # Force base-10 to avoid bash treating "08"/"09" as invalid octal
 HOUR_UTC=$(( 10#$(date -u +%H) ))
@@ -49,8 +49,8 @@ HOUR_TUNIS=$(( HOUR_UTC + 1 ))
 DOW=$(date -u +%u)  # 1=Mon … 7=Sun
 if [[ "$FORCE_RUN" == "true" ]]; then
   log_info "Work-hours check bypassed (--force flag set by Omar)"
-elif [[ "$DOW" -ge 6 ]] || [[ "$HOUR_UTC" -lt 8 || "$HOUR_UTC" -ge 20 ]]; then
-  log_info "Outside work hours ($(date -u '+%H:%M') UTC = ${HOUR_TUNIS}:$(date -u +%M) Tunis | work: Mon-Fri 09:00-21:00 Tunis). Skipping."
+elif [[ "$HOUR_UTC" -lt 8 || "$HOUR_UTC" -ge 20 ]]; then
+  log_info "Outside work hours ($(date -u '+%H:%M') UTC = ${HOUR_TUNIS}:$(date -u +%M) Tunis | work: Mon-Sun 09:00-21:00 Tunis). Skipping."
   exit 0
 fi
 
