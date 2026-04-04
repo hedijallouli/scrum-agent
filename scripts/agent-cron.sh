@@ -79,6 +79,14 @@ cd "$PROJECT_DIR"
 git checkout "${BASE_BRANCH}" -q 2>/dev/null || true
 git stash -q 2>/dev/null || true
 git pull origin "${BASE_BRANCH}" --rebase 2>&1 | tail -3 || echo "[WARNING] git pull failed, continuing"
+
+# Auto-sync scrum-agent scripts (pull latest from origin)
+if [[ -d "${SCRIPT_DIR}/../.git" ]]; then
+  cd "${SCRIPT_DIR}/.."
+  git pull origin master --rebase -q 2>/dev/null || echo "[WARNING] scrum-agent pull failed"
+  cd "$PROJECT_DIR"
+fi
+
 sync
 SCRIPT_HASH_AFTER=$(md5sum "${BASH_SOURCE[0]}" | cut -d' ' -f1)
 if [[ "$SCRIPT_HASH_BEFORE" != "$SCRIPT_HASH_AFTER" ]]; then
