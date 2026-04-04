@@ -857,11 +857,25 @@ build_and_deploy_test() {
   # Install deps if needed
   npm install --silent 2>/dev/null || true
   
-  # Build web app
-  if npm run build --workspace=@bisb/web 2>/dev/null; then
-    cp -r packages/web/dist/* /var/www/bisb-game-test/ 2>/dev/null || true
+  # Build web app (use project config or skip if no build command)
+  local BUILD_CMD="${PROJECT_BUILD_CMD:-npm run build}"
+  local DEPLOY_DIR="${PROJECT_DEPLOY_DIR:-}"
+
+  if [[ -z "$DEPLOY_DIR" ]]; then
+    log_info "No PROJECT_DEPLOY_DIR configured, skipping build deploy"
+    return
+  fi
+
+  if eval "$BUILD_CMD" 2>/dev/null; then
+    # Try common output dirs
+    for out_dir in dist build packages/web/dist; do
+      if [[ -d "$out_dir" ]]; then
+        cp -r "$out_dir"/* "$DEPLOY_DIR" 2>/dev/null || true
+        break
+      fi
+    done
     echo "$CURRENT_HASH" > "$LAST_BUILD_HASH"
-    log_info "Test build deployed to port 3002"
+    log_info "Build deployed to ${DEPLOY_DIR}"
   else
     log_error "Build failed for test branch"
   fi

@@ -158,7 +158,7 @@ print(', '.join(keys[:8]) if keys else 'N/A')
 " 2>/dev/null || echo "N/A")
 
 # ── Build shared data context for Haiku prompts ───────────────────────────────
-SPRINT_CONTEXT="Sprint ${SPRINT_NUM} — Projet BisB (jeu de société tunisien digitalisé)
+SPRINT_CONTEXT="Sprint ${SPRINT_NUM} — Projet ${PROJECT_KEY} (${PROJECT_NAME:-projet})
 
 TICKETS TERMINÉS (${DONE_COUNT} total):
 ${DONE_TICKET_LIST}
@@ -205,7 +205,7 @@ YOUSSEF_PROMPT="Tu présentes ton travail lors du Sprint Review. Tu es Youssef, 
 
 Liste les tickets que tu as implémentés ce sprint. Mentionne les PRs si tu en connais.
 Dis comment ça s'est passé techniquement — difficultés, solutions, qualité du code.
-Format: 'J'ai livré BISB-X et BISB-Y. PR#N est mergé. [commentaire technique]...'
+Format: 'J'ai livré ${PROJECT_KEY}-X et ${PROJECT_KEY}-Y. PR#N est mergé. [commentaire technique]...'
 Sois concret, pas vague."
 
 YOUSSEF_MSG=$(ceremony_haiku_turn \
@@ -291,14 +291,14 @@ sleep 30
 # ── 5. Layla: player UX / product perspective ────────────────────────────────
 log_info "Layla presents player UX perspective..."
 
-LAYLA_PROMPT="Tu présentes la perspective joueur BisB lors du Sprint Review. Tu es Layla, la Product Strategist.
+LAYLA_PROMPT="Tu présentes la perspective utilisateur lors du Sprint Review. Tu es Layla, la Product Strategist.
 
-Évalue ce sprint du point de vue d'un joueur du jeu BisB (jeu de société tunisien digitalisé).
-Quelle feature de ce sprint va le plus améliorer l'expérience de jeu?
-Y a-t-il une observation sur l'UX joueur?
+Évalue ce sprint du point de vue de l'utilisateur final du projet ${PROJECT_KEY} (${PROJECT_NAME:-le projet}).
+Quelle feature de ce sprint va le plus améliorer l'expérience utilisateur?
+Y a-t-il une observation sur l'UX?
 
-Format: 'Du point de vue joueur BisB, ce sprint [évaluation globale]. La feature [meilleure feature] va vraiment améliorer l'expérience. [Observation UX spécifique au jeu BisB].'
-Ancre-toi dans les mécaniques du jeu (enchères, propriétés, casino, tombola, etc.)."
+Format: 'Du point de vue utilisateur, ce sprint [évaluation globale]. La feature [meilleure feature] va vraiment améliorer l'expérience. [Observation UX spécifique].'
+Base-toi sur le contexte du projet dans ton fichier persona."
 
 LAYLA_MSG=$(ceremony_haiku_turn_cumulative \
   "layla" \
@@ -359,6 +359,14 @@ sleep 30
 # ── 7. Salma closes ───────────────────────────────────────────────────────────
 log_info "Salma closes the Sprint Review..."
 
+DEPLOY_LINK=""
+if [[ -n "${PROJECT_DEPLOY_URL:-}" ]]; then
+  DEPLOY_LINK="
+
+:link: **Lien de vérification** : ${PROJECT_DEPLOY_URL}
+_Hedi, tu peux vérifier le résultat du sprint ici._"
+fi
+
 SALMA_CLOSE_PROMPT="Tu conclus le Sprint Review en tant que PM/PO. Tu es Salma.
 
 Basé sur ce sprint, donne 2-3 points clés à retenir pour le backlog du prochain sprint.
@@ -376,9 +384,9 @@ SALMA_CLOSE=$(ceremony_haiku_turn_cumulative \
 
 AGENT_NAME="salma"
 if [[ "${CHAT_BACKEND:-slack}" == "mattermost" && -n "$CEREMONY_ROOT_ID" ]]; then
-  mm_post "📋 **Salma** (PM) — Clôture :\n\n${SALMA_CLOSE}" "$CEREMONY_CHANNEL" "" "$CEREMONY_ROOT_ID"
+  mm_post "📋 **Salma** (PM) — Clôture :\n\n${SALMA_CLOSE}${DEPLOY_LINK}" "$CEREMONY_CHANNEL" "" "$CEREMONY_ROOT_ID"
 else
-  slack_notify "📋 *Salma (PM) — Clôture* :\n\n${SALMA_CLOSE}" "$CEREMONY_CHANNEL"
+  slack_notify "📋 *Salma (PM) — Clôture* :\n\n${SALMA_CLOSE}${DEPLOY_LINK}" "$CEREMONY_CHANNEL"
 fi
 
 log_info "Ceremony messages posted. Now adding comments to Done tickets..."
