@@ -59,6 +59,8 @@ if [[ -f "$DECISIONS_FILE" ]]; then
   PASS_COUNT=$(grep -c '"decision":"PASS"' "$DECISIONS_FILE" 2>/dev/null || echo "0")
   FAIL_COUNT=$(grep -c '"decision":"FAIL"' "$DECISIONS_FILE" 2>/dev/null || echo "0")
 fi
+PASS_COUNT=$(echo "$PASS_COUNT" | tr -dc '0-9'); PASS_COUNT=${PASS_COUNT:-0}
+FAIL_COUNT=$(echo "$FAIL_COUNT" | tr -dc '0-9'); FAIL_COUNT=${FAIL_COUNT:-0}
 TOTAL_REVIEWS=$(( PASS_COUNT + FAIL_COUNT ))
 QA_PASS_RATE="N/A"
 if (( TOTAL_REVIEWS > 0 )); then
