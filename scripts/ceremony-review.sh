@@ -132,6 +132,9 @@ print(first_pass)
 " 2>/dev/null || echo "0")
 fi
 
+PASS_COUNT=$(echo "$PASS_COUNT" | tr -dc '0-9'); PASS_COUNT=${PASS_COUNT:-0}
+FAIL_COUNT=$(echo "$FAIL_COUNT" | tr -dc '0-9'); FAIL_COUNT=${FAIL_COUNT:-0}
+PASS_FIRST_TRY=$(echo "$PASS_FIRST_TRY" | tr -dc '0-9'); PASS_FIRST_TRY=${PASS_FIRST_TRY:-0}
 TOTAL_REVIEWS=$(( PASS_COUNT + FAIL_COUNT ))
 if [[ "$TOTAL_REVIEWS" -gt 0 ]]; then
   QA_PERCENT=$(python3 -c "print(round($PASS_FIRST_TRY * 100 / $TOTAL_REVIEWS))" 2>/dev/null || echo "0")

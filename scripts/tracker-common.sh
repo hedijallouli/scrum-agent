@@ -521,6 +521,68 @@ for issue in filtered[:max_results]:
 " "$jql" "$max_results" 2>/dev/null
   }
 
+  # Override jira_search_keys_with_summaries → Plane issue search with summaries
+  jira_search_keys_with_summaries() {
+    local jql="$1" max_results="${2:-10}"
+    python3 -c "
+import json, sys, os, re, requests
+
+jql = sys.argv[1]
+max_results = int(sys.argv[2])
+base = os.environ.get('PLANE_BASE_URL', '').rstrip('/')
+ws = os.environ.get('PLANE_WORKSPACE_SLUG', '')
+pid = os.environ.get('PLANE_PROJECT_ID', '')
+api_key = os.environ.get('PLANE_API_KEY', '')
+project_key = os.environ.get('JIRA_PROJECT', 'BISB')
+
+headers = {'X-API-Key': api_key, 'Content-Type': 'application/json'}
+
+exclude_done = 'Done' in jql and '!=' in jql
+only_done = \"statusCategory = 'Done'\" in jql or 'statusCategory=Done' in jql
+
+states_r = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/states/', headers=headers, timeout=15)
+states_data = states_r.json() if states_r.ok else {}
+state_list = states_data.get('results', states_data if isinstance(states_data, list) else [])
+state_id_to_group = {s['id']: s.get('group','') for s in state_list}
+
+labels_r = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/labels/', headers=headers, timeout=15)
+label_map = {}
+for l in (labels_r.json() if isinstance(labels_r.json(), list) else labels_r.json().get('results', [])):
+    label_map[l.get('name', '')] = l.get('id', '')
+
+required_labels = re.findall(r\"labels\s*=\s*'([^']+)'\", jql)
+
+r = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/', headers=headers,
+                 params={'per_page': 200}, timeout=30)
+data = r.json()
+results = data.get('results', data if isinstance(data, list) else [])
+
+def get_issue_label_names(issue):
+    label_detail = issue.get('label_detail', [])
+    if label_detail:
+        return {l.get('name', '') for l in label_detail}
+    id_to_name = {v: k for k, v in label_map.items()}
+    return {id_to_name.get(lid, '') for lid in issue.get('label_ids', issue.get('labels', []))}
+
+filtered = []
+for issue in results:
+    issue_state_group = state_id_to_group.get(issue.get('state', ''), '')
+    if exclude_done and issue_state_group == 'completed':
+        continue
+    if only_done and issue_state_group != 'completed':
+        continue
+    issue_labels = get_issue_label_names(issue)
+    if required_labels and not all(l in issue_labels for l in required_labels):
+        continue
+    filtered.append(issue)
+
+for issue in filtered[:max_results]:
+    seq = issue.get('sequence_id', 0)
+    name = issue.get('name', 'No summary')
+    print(f'{project_key}-{seq}|{name}')
+" "$jql" "$max_results" 2>/dev/null
+  }
+
   # Override jira_create_ticket → Plane issue create
   jira_create_ticket() {
     local summary="$1" issue_type="${2:-Task}"
