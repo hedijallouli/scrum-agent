@@ -618,8 +618,8 @@ for issue in filtered[:max_results]:
 
   # Override jira_add_rich_comment → Plane plain comment (no header, no avatar, no verdict badge)
   jira_add_rich_comment() {
-    local key="$1" agent="$2" verdict="$3" message="$4"
-    jira_add_comment "$key" "$message"
+    local key="$1" agent="${2:-}" verdict="${3:-}" message="${4:-}"
+    [[ -n "$message" ]] && jira_add_comment "$key" "$message"
   }
 
   # Override jira_assign_to_me → Plane set assignee
