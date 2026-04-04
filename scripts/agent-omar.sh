@@ -93,6 +93,7 @@ if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
   cat > "$_bl_script" << 'BLPYEOF'
 import os, requests
 OMAR_ID = "435563ee-fef1-4cab-9048-653e0e7bb74a"
+project_key = os.environ.get('JIRA_PROJECT', 'BISB')
 base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
 ws   = os.environ.get('PLANE_WORKSPACE_SLUG','')
 pid  = os.environ.get('PLANE_PROJECT_ID','')
@@ -115,8 +116,8 @@ for issue in issues:
     if not (assignees == [OMAR_ID]):
         requests.patch(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/{issue["id"]}/',
                        headers=h, json={'assignees': [OMAR_ID]}, timeout=10)
-    results.append(f'BISB-{seq}')
-    print(f'BISB-{seq}|{title}')
+    results.append(f'{project_key}-{seq}')
+    print(f'{project_key}-{seq}|{title}')
 BLPYEOF
   BLOCKED_DETAILS=$(python3 "$_bl_script" 2>/dev/null || true)
   rm -f "$_bl_script"
@@ -137,11 +138,11 @@ fi
 
 # ─── 1b. Repeated failures — auto-unblock stuck tickets ───────────────────
 log_info "Check 1b: Repeated failures (auto-unblock)..."
-for retry_file in "${RETRY_DIR}"/BISB-*; do
+for retry_file in "${RETRY_DIR}"/${PROJECT_KEY}-*; do
   [[ -f "$retry_file" ]] || continue
   retry_basename=$(basename "$retry_file")
-  # Extract ticket and agent from filename (e.g., BISB-91-youssef)
-  retry_ticket=$(echo "$retry_basename" | grep -oE 'BISB-[0-9]+')
+  # Extract ticket and agent from filename (e.g., CDO-16-youssef)
+  retry_ticket=$(echo "$retry_basename" | grep -oE "${PROJECT_KEY}-[0-9]+")
   retry_agent=$(echo "$retry_basename" | sed "s/${retry_ticket}-//")
   [[ -z "$retry_ticket" || -z "$retry_agent" ]] && continue
 
@@ -149,28 +150,57 @@ for retry_file in "${RETRY_DIR}"/BISB-*; do
   if (( retry_count >= 2 )); then
     log_info "Ticket ${retry_ticket} stuck with ${retry_agent} (${retry_count} retries) — auto-unblocking"
 
+    # Track cumulative attempts across all escalation cycles
+    TOTAL_ATTEMPTS_DIR="/tmp/${PROJECT_PREFIX}-total-attempts"
+    mkdir -p "$TOTAL_ATTEMPTS_DIR"
+    TOTAL_FILE="${TOTAL_ATTEMPTS_DIR}/${retry_ticket}"
+    TOTAL_ATTEMPTS=$(cat "$TOTAL_FILE" 2>/dev/null || echo "0")
+    TOTAL_ATTEMPTS=$(( TOTAL_ATTEMPTS + retry_count ))
+    echo "$TOTAL_ATTEMPTS" > "$TOTAL_FILE"
+
     # Read the latest error from feedback for context
     LATEST_ERROR=$(cat "${FEEDBACK_DIR}/${retry_ticket}.txt" 2>/dev/null | head -5 | tr '\n' ' ' || echo "Unknown error")
 
-    # Move ticket to Blocked state + assign Omar (Plane native — labels removed)
-    plane_set_state "${retry_ticket}" "Blocked" 2>/dev/null || true
-    plane_set_assignee "${retry_ticket}" "omar" 2>/dev/null || true
+    if (( TOTAL_ATTEMPTS >= 6 )); then
+      # Too many total attempts — escalate to human, stop looping
+      log_info "Ticket ${retry_ticket} has ${TOTAL_ATTEMPTS} total attempts ��� escalating to Needs Human"
+      plane_set_state "${retry_ticket}" "Needs Human" 2>/dev/null || true
+      plane_set_assignee "${retry_ticket}" "hedi" 2>/dev/null || true
 
-    jira_add_rich_comment "$retry_ticket" "omar" "WARNING" "## Auto-Bloqué
-${retry_ticket} bloqué après ${retry_count} tentatives par ${retry_agent}.
+      jira_add_rich_comment "$retry_ticket" "omar" "ESCALATION" "## Escaladé à Hedi
+${retry_ticket} a échoué **${TOTAL_ATTEMPTS} fois au total** (${retry_count} dernières par ${retry_agent}).
+Les agents ne peuvent pas résoudre ce problème seuls.
+
+Dernier contexte d'erreur : ${LATEST_ERROR}
+
+État → Needs Human. @hedi doit intervenir." || true
+
+      slack_notify "**Escalade humaine** — *$(mm_ticket_link "${retry_ticket}")* après **${TOTAL_ATTEMPTS} tentatives totales**.
+Les agents ne peuvent pas résoudre. @hedi doit intervenir." "alerts" "danger" 2>/dev/null || true
+
+      rm -f "$retry_file"
+      add_alert "${retry_ticket} escaladé à Hedi (${TOTAL_ATTEMPTS} tentatives totales)"
+      log_activity "omar" "$retry_ticket" "ESCALATE_HUMAN" "Needs Human after ${TOTAL_ATTEMPTS} total attempts"
+    else
+      # Normal auto-block — Omar triages
+      plane_set_state "${retry_ticket}" "Blocked" 2>/dev/null || true
+      plane_set_assignee "${retry_ticket}" "omar" 2>/dev/null || true
+
+      jira_add_rich_comment "$retry_ticket" "omar" "WARNING" "## Auto-Bloqué
+${retry_ticket} bloqué après ${retry_count} tentatives par ${retry_agent} (${TOTAL_ATTEMPTS} total).
 Réassigné à Omar pour triage.
 
 Dernier contexte d'erreur : ${LATEST_ERROR}
 
-État → Blocked. Omar va investiguer."
+État → Blocked. Omar va investiguer." || true
 
-    slack_notify "**Ticket auto-bloqué** — *$(mm_ticket_link "${retry_ticket}")* après **${retry_count} tentatives** par ${retry_agent}.
-Réassigné à Omar pour triage. État : **Blocked**." "alerts" "danger" 2>/dev/null || true
+      slack_notify "**Ticket auto-bloqué** — *$(mm_ticket_link "${retry_ticket}")* après **${retry_count} tentatives** par ${retry_agent} (${TOTAL_ATTEMPTS} total).
+Réassigné à Omar pour triage." "alerts" "danger" 2>/dev/null || true
 
-    # Clear retry file to prevent re-triggering
-    rm -f "$retry_file"
-    add_alert "${retry_ticket} auto-bloqué (${retry_count} échecs par ${retry_agent}) → Omar"
-    log_activity "omar" "$retry_ticket" "AUTO_BLOCK_REASSIGN" "Set Blocked + assigned Omar after ${retry_count} failures by ${retry_agent}"
+      rm -f "$retry_file"
+      add_alert "${retry_ticket} auto-bloqué (${retry_count} échecs par ${retry_agent}, ${TOTAL_ATTEMPTS} total) → Omar"
+      log_activity "omar" "$retry_ticket" "AUTO_BLOCK_REASSIGN" "Set Blocked + assigned Omar after ${retry_count} failures by ${retry_agent} (${TOTAL_ATTEMPTS} total)"
+    fi
   fi
 done
 
@@ -182,9 +212,9 @@ for lockfile in /tmp/${PROJECT_PREFIX}-agent-*.lock; do
   [[ "$lockfile" == *"omar.lock" ]] && continue
   lock_age=$(( $(date +%s) - $(stat -c %Y "$lockfile" 2>/dev/null || stat -f %m "$lockfile" 2>/dev/null || echo 0) ))
   if (( lock_age > LOCK_MAX_AGE )); then
-    # Extract agent name from lock file (e.g. "nadia" from "bisb-agent-nadia-BISB-17.lock")
+    # Extract agent name from lock file (e.g. "nadia" from "cdo-agent-nadia-CDO-17.lock")
     lock_basename=$(basename "$lockfile" .lock)
-    agent_name=$(echo "$lock_basename" | sed 's/bisb-agent-//' | sed 's/-BISB-.*//')
+    agent_name=$(echo "$lock_basename" | sed "s/${PROJECT_PREFIX}-agent-//" | sed "s/-${PROJECT_KEY}-.*//")
     lock_hours=$(( lock_age / 3600 ))
     add_alert "Cleared stale lock for ${agent_name} (stuck ${lock_hours}h)"
     rm -f "$lockfile"
@@ -243,6 +273,7 @@ if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
   _op_script=$(mktemp /tmp/${PROJECT_PREFIX}-omar-op-XXXXXX.py)
   cat > "$_op_script" << 'OPPYEOF'
 import os, requests
+project_key = os.environ.get('JIRA_PROJECT', 'BISB')
 base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
 ws   = os.environ.get('PLANE_WORKSPACE_SLUG','')
 pid  = os.environ.get('PLANE_PROJECT_ID','')
@@ -279,7 +310,7 @@ for issue in issues:
     r2 = requests.patch(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/{issue["id"]}/',
                         headers=h, json={'assignees': [target_id]}, timeout=10)
     status = 'OK' if r2.status_code in (200,201) else f'ERR{r2.status_code}'
-    print(f'BISB-{seq}|{target_agent}|{sn}|{status}')
+    print(f'{project_key}-{seq}|{target_agent}|{sn}|{status}')
 OPPYEOF
   ORPHAN_RESULTS=$(python3 "$_op_script" 2>/dev/null || true)
   rm -f "$_op_script"
@@ -408,6 +439,7 @@ if [[ "$TRIAGE_COOLDOWN" == "false" ]]; then
   if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
     REVIEW_TICKETS=$(python3 - << 'TRPYEOF' 2>/dev/null || true
 import os, requests
+project_key = os.environ.get('JIRA_PROJECT', 'BISB')
 base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
 ws   = os.environ.get('PLANE_WORKSPACE_SLUG','')
 pid  = os.environ.get('PLANE_PROJECT_ID','')
@@ -422,7 +454,7 @@ issues = r.json().get('results', [])
 for issue in issues:
     if issue.get('state') in done_ids: continue
     if state_name.get(issue.get('state',''), '') != 'Blocked': continue
-    print(f'BISB-{issue.get("sequence_id","?")}')
+    print(f'{project_key}-{issue.get("sequence_id","?")}')
 TRPYEOF
 )
   else
@@ -444,7 +476,7 @@ TRPYEOF
       log_info "Found ${NEW_COUNT} blocked ticket(s) needing triage: ${NEW_TICKETS}"
 
       N8N_URL="${N8N_URL:-http://localhost:5678}"
-      if trigger_webhook "${N8N_URL}/webhook/bisb-daily-standup" "{\"trigger\":\"omar\",\"reason\":\"triage\",\"tickets\":\"${NEW_TICKETS}\"}" "Blocker Triage (auto)"; then
+      if trigger_webhook "${N8N_URL}/webhook/${PROJECT_PREFIX}-daily-standup" "{\"trigger\":\"omar\",\"reason\":\"triage\",\"tickets\":\"${NEW_TICKETS}\"}" "Blocker Triage (auto)"; then
         touch "$TRIAGE_COOLDOWN_FILE"
         echo "$REVIEW_TICKETS" >> "$TRIAGE_REVIEWED_FILE"
         add_alert "Auto-triggered triage for ${NEW_COUNT} blocked ticket(s): ${NEW_TICKETS}"
@@ -481,7 +513,7 @@ fi
 DASHBOARD_FLAG="/tmp/${PROJECT_PREFIX}-dashboard-$(date +%Y-%m-%d)"
 if [[ ! -f "$DASHBOARD_FLAG" ]]; then
   log_info "Generating daily dashboard..."
-  DASHBOARD_DIR="/var/www/bisb-dashboard"
+  DASHBOARD_DIR="/var/www/${PROJECT_PREFIX}-dashboard"
   mkdir -p "$DASHBOARD_DIR"
 
   # Gather all metrics
@@ -553,11 +585,11 @@ print(f'{action} on {ticket} ({time_str})')
 
   # Stuck tickets
   STUCK_ROWS=""
-  for f in /tmp/${PROJECT_PREFIX}-retries/BISB-*; do
+  for f in /tmp/${PROJECT_PREFIX}-retries/${PROJECT_KEY}-*; do
     [[ -f "$f" ]] || continue
     cnt=$(cat "$f" 2>/dev/null || echo 0)
     if [[ "$cnt" -ge 2 ]]; then
-      tname=$(basename "$f" | grep -oP 'BISB-\d+' || basename "$f")
+      tname=$(basename "$f" | grep -oP "${PROJECT_KEY}-\\d+" || basename "$f")
       STUCK_ROWS="${STUCK_ROWS}<tr><td>${tname}</td><td>${cnt} retries</td></tr>"
     fi
   done

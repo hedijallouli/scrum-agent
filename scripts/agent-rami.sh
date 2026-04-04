@@ -708,6 +708,26 @@ Lines changed: ${DIFF_SIZE}
       log_activity "rami" "$TICKET_KEY" "MERGED" "PR #${PR_NUMBER} merged to ${BASE_BRANCH}, post-merge verified"
       append_ticket_history "$TICKET_KEY" "rami" "MERGED" "PR #${PR_NUMBER} merged, all checks passed + post-merge verified"
       log_decision "rami" "$TICKET_KEY" "MERGED" "All automated checks passed, post-merge build+tests passed"
+      # Auto-deploy: build and copy to production directory
+      if [[ -n "${PROJECT_DEPLOY_DIR:-}" ]]; then
+        log_info "Auto-deploying to ${PROJECT_DEPLOY_DIR}..."
+        cd "$PROJECT_DIR"
+        git pull origin "${BASE_BRANCH}" -q 2>/dev/null || true
+        if bash -c "${PROJECT_BUILD_CMD:-npm run build}" 2>/dev/null; then
+          for _deploy_out in dist build; do
+            if [[ -d "$_deploy_out" ]]; then
+              cp -r "$_deploy_out"/* "${PROJECT_DEPLOY_DIR}/" 2>/dev/null || true
+              log_info "Deployed $_deploy_out/ to ${PROJECT_DEPLOY_DIR}"
+              slack_notify "Deploiement auto: $(mm_ticket_link "${TICKET_KEY}") deployee. Lien: ${PROJECT_DEPLOY_URL:-N/A}" "pipeline" "good" || true
+              break
+            fi
+          done
+        else
+          log_error "Auto-deploy build failed for ${TICKET_KEY}"
+          slack_notify "Build echouee apres merge de $(mm_ticket_link "${TICKET_KEY}") — deploiement annule." "alerts" "warning" || true
+        fi
+      fi
+
       log_success "=== Rami approved & merged ${TICKET_KEY} — pipeline complete ==="
     fi
 

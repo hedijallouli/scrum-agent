@@ -84,7 +84,7 @@ ask() {
   local answer
   read -r answer
   answer="${answer:-$default}"
-  eval "$var_name=\"\$answer\""
+  printf -v "$var_name" '%s' "$answer"
 }
 
 # ─── Multi-select Helper ────────────────────────────────────────────────────
@@ -99,9 +99,9 @@ ask_agents() {
   read -r answer
   answer="${answer:-all}"
   if [[ "$answer" == "all" ]]; then
-    eval "$var_name=\"salma,youssef,nadia,rami,omar,layla\""
+    printf -v "$var_name" '%s' "salma,youssef,nadia,rami,omar,layla"
   else
-    eval "$var_name=\"\$answer\""
+    printf -v "$var_name" '%s' "$answer"
   fi
 }
 

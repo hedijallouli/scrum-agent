@@ -95,6 +95,11 @@ MAX_SPRINTS_PER_WEEK=2
 # PHASE 1: Check Hedi's Slack Messages
 # ═══════════════════════════════════════════════════════════════════════════
 check_hedi_messages() {
+  # Skip DM check for Mattermost (DM routing handled by n8n webhooks)
+  if [[ "${CHAT_BACKEND:-slack}" == "mattermost" ]]; then
+    return 0
+  fi
+
   local CHANNEL_ID="${SLACK_CHANNEL_PIPELINE:-}"
   [[ -z "$CHANNEL_ID" ]] && return 0
   [[ -z "${SLACK_BOT_TOKEN:-}" ]] && return 0
@@ -104,7 +109,8 @@ check_hedi_messages() {
   OLDEST=$(cat "$LAST_CHECK_FILE" 2>/dev/null || echo "0")
 
   local API_RESPONSE
-  API_RESPONSE=$(curl -s -H "Authorization: Bearer ${SLACK_BOT_TOKEN}"     "https://slack.com/api/conversations.history?channel=${CHANNEL_ID}&oldest=${OLDEST}&limit=20" 2>/dev/null) || return 0
+  API_RESPONSE=$(curl -s -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+    "https://slack.com/api/conversations.history?channel=${CHANNEL_ID}&oldest=${OLDEST}&limit=20" 2>/dev/null) || return 0
 
   local LATEST_TS
   LATEST_TS=$(echo "$API_RESPONSE" | python3 -c "
@@ -866,7 +872,7 @@ build_and_deploy_test() {
     return
   fi
 
-  if eval "$BUILD_CMD" 2>/dev/null; then
+  if bash -c "$BUILD_CMD" 2>/dev/null; then
     # Try common output dirs
     for out_dir in dist build packages/web/dist; do
       if [[ -d "$out_dir" ]]; then

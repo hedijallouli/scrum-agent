@@ -738,6 +738,18 @@ except Exception as e:
 PYEOF
   }
 
+  # Override jira_set_state → route to plane_update_state
+  jira_set_state() {
+    local key="$1" state_name="$2"
+    # Normalize common state names
+    case "${state_name,,}" in
+      needs-human|needs_human|"needs human") state_name="Needs Human" ;;
+      blocked) state_name="Blocked" ;;
+      done|terminé) state_name="Done" ;;
+    esac
+    plane_update_state "$key" "$state_name"
+  }
+
   # Get unassigned tickets in Todo state (for Salma to pick up as new work)
   plane_get_unassigned_todo() {
     local project_key="${JIRA_PROJECT:-BISB}"

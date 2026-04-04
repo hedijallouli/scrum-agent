@@ -72,7 +72,7 @@ init_log() {
 # Each agent sets AGENT_NAME before sourcing this file for per-agent locks.
 # This allows Salma, Youssef, Nadia, and Rami to run in parallel.
 LOCK_FILE="/tmp/${PROJECT_PREFIX}-agent-${AGENT_NAME:-global}.lock"
-LOCK_MAX_AGE=1800  # 30 minutes
+LOCK_MAX_AGE=3600  # 60 minutes (Claude calls can take 40+ min)
 
 acquire_lock() {
   if [[ -f "$LOCK_FILE" ]]; then
@@ -86,7 +86,10 @@ acquire_lock() {
     fi
   fi
   echo "$$" > "$LOCK_FILE"
-  trap 'rm -f "$LOCK_FILE"' EXIT
+  # Heartbeat: touch lock file every 5 min to prevent stale lock removal
+  ( while kill -0 $$ 2>/dev/null; do sleep 300; touch "$LOCK_FILE" 2>/dev/null; done ) &
+  _HEARTBEAT_PID=$!
+  trap 'kill $_HEARTBEAT_PID 2>/dev/null; rm -f "$LOCK_FILE"' EXIT
   return 0
 }
 
@@ -444,18 +447,17 @@ for issue in data.get('issues', []):
 
 # ─── Agent Character System (Sims-like Personality) ─────────────────────────
 # Language setting: fr=French (default), en=English, de=German
-# Override with: bash set-lang.sh [fr|en|de]  or BISB_LANG=en in .env.agents
-BISB_LANG="${BISB_LANG:-fr}"
+# Override with: bash set-lang.sh [fr|en|de]  or AGENT_LANG=en in .env.agents
+AGENT_LANG="${AGENT_LANG:-${BISB_LANG:-fr}}"
 
 # Agent character traits (used by Claude when generating personalized messages)
 declare -A AGENT_TRAITS=(
-  [salma]="Organisée, Empathique, Vision long terme, Leader naturelle, Tunisienne fière du jeu BisB"
+  [salma]="Organisée, Empathique, Vision long terme, Leader naturelle"
   [youssef]="Perfectionniste, Curieux, Noctambule, Humble, Amoureux du clean code"
-  [nadia]="Méticuleuse, Directe, Juste, Gardienne des règles du jeu, Patience à toute épreuve"
+  [nadia]="Méticuleuse, Directe, Juste, Gardienne de la qualité, Patience à toute épreuve"
   [rami]="Expérimenté, Mentor bienveillant, Pragmatique, Vision systémique, Calme en toutes circonstances"
   [omar]="Vigilant, Discret, Méthodique, Pas de panique, Nuit et jour sur le pipeline"
-  [layla]="Visionnaire, Centrée joueur, Stratégique, Optimiste, Culturellement ancrée"
-  # [karim] retired — DevOps absorbed by Omar
+  [layla]="Visionnaire, Centrée utilisateur, Stratégique, Optimiste, Culturellement ancrée"
 )
 
 declare -A AGENT_CATCHPHRASE=(
@@ -2275,6 +2277,13 @@ load_project_config() {
 load_project_config
 
 # ─── Tracker/Chat Backend Abstraction ──────────────────────────────────────
+# No-op stubs for Plane-only functions — overridden by tracker-common.sh when TRACKER_BACKEND=plane
+plane_set_assignee() { :; }
+plane_set_state() { :; }
+plane_update_state() { :; }
+plane_get_assigned_tickets() { :; }
+jira_set_state() { jira_transition "$1" "$2" 2>/dev/null || true; }
+
 # Source tracker-common.sh to override jira_*/slack_notify with Plane/Mattermost
 # when TRACKER_BACKEND=plane or CHAT_BACKEND=mattermost is set.
 if [[ -f "${SCRIPT_DIR}/tracker-common.sh" ]]; then
