@@ -24,13 +24,23 @@ log_info "Generating weekly report for $WEEK_ID"
 SPRINT_ID=$(jira_get_active_sprint_id 2>/dev/null || echo "")
 SPRINT_CONTEXT=""
 
-if [[ -n "$SPRINT_ID" ]]; then
-  # Get sprint tickets status
+if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
+  _cycle_id=$(plane_get_current_cycle_id 2>/dev/null || echo "")
+  if [[ -n "$_cycle_id" ]]; then
+    _stats=$(plane_get_cycle_stats "$_cycle_id" 2>/dev/null || echo '{"done":0,"in_progress":0,"todo":0,"total":0}')
+    DONE_COUNT=$(echo "$_stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('done',0))" 2>/dev/null || echo 0)
+    TOTAL_COUNT=$(echo "$_stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total',0))" 2>/dev/null || echo 0)
+    IN_PROGRESS=$(plane_get_cycle_issues "$_cycle_id" 2>/dev/null || echo "None")
+    BLOCKED_COUNT=0
+    SPRINT_CONTEXT="Sprint Progress: ${DONE_COUNT}/${TOTAL_COUNT} tickets done, ${BLOCKED_COUNT} blocked.
+In-progress tickets:
+${IN_PROGRESS}"
+  fi
+elif [[ -n "$SPRINT_ID" ]]; then
   DONE_COUNT=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels = 'sprint-active' AND statusCategory = 'Done'" "50" 2>/dev/null | wc -l || echo 0)
   TOTAL_COUNT=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels = 'sprint-active'" "50" 2>/dev/null | wc -l || echo 0)
   BLOCKED_COUNT=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels = 'sprint-active' AND labels IN ('blocked','needs-human-review')" "50" 2>/dev/null | wc -l || echo 0)
   IN_PROGRESS=$(jira_search_keys_with_summaries "project = ${JIRA_PROJECT} AND labels = 'sprint-active' AND statusCategory != 'Done'" "20" 2>/dev/null || echo "None")
-
   SPRINT_CONTEXT="Sprint Progress: ${DONE_COUNT}/${TOTAL_COUNT} tickets done, ${BLOCKED_COUNT} blocked.
 In-progress tickets:
 ${IN_PROGRESS}"

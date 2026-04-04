@@ -669,11 +669,35 @@ run_sprint_ceremony_if_needed() {
     return
   fi
 
-  # Count Plane tickets still in started/unstarted states
+  # Count cycle tickets still not done (cycle-based, not all project tickets)
   local REMAINING=99
-  local _tmp_plane
-  _tmp_plane=$(mktemp /tmp/${PROJECT_PREFIX}-plane-check-XXXXXX.py)
-  cat > "$_tmp_plane" << 'PLANE_PYEOF'
+  if declare -f plane_get_current_cycle_id &>/dev/null && declare -f plane_get_cycle_stats &>/dev/null; then
+    local _cycle_id
+    _cycle_id=$(plane_get_current_cycle_id 2>/dev/null || echo "")
+    if [[ -n "$_cycle_id" ]]; then
+      local _stats
+      _stats=$(plane_get_cycle_stats "$_cycle_id" 2>/dev/null || echo "")
+      if [[ -n "$_stats" ]]; then
+        local _done _total
+        _done=$(echo "$_stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('done',0))" 2>/dev/null || echo 0)
+        _total=$(echo "$_stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total',0))" 2>/dev/null || echo 0)
+        _done=$(echo "$_done" | tr -dc '0-9'); _done=${_done:-0}
+        _total=$(echo "$_total" | tr -dc '0-9'); _total=${_total:-0}
+        if [[ "$_total" -gt 0 ]]; then
+          REMAINING=$(( _total - _done ))
+        else
+          REMAINING=99  # No tickets in cycle → not done
+        fi
+        log_info "Sprint progress: ${_done}/${_total} done (cycle ${_cycle_id:0:8})"
+      fi
+    else
+      log_info "No active Plane cycle — sprint completion check skipped"
+    fi
+  else
+    # Fallback: count all project tickets (legacy)
+    local _tmp_plane
+    _tmp_plane=$(mktemp /tmp/${PROJECT_PREFIX}-plane-check-XXXXXX.py)
+    cat > "$_tmp_plane" << 'PLANE_PYEOF'
 import os, sys, requests
 base = os.environ.get('PLANE_BASE_URL', '').rstrip('/')
 ws   = os.environ.get('PLANE_WORKSPACE_SLUG', '')
@@ -693,10 +717,11 @@ try:
 except Exception:
     print(99)
 PLANE_PYEOF
-  REMAINING=$(python3 "$_tmp_plane" 2>/dev/null || echo 99)
-  rm -f "$_tmp_plane"
-  REMAINING=$(echo "$REMAINING" | tr -dc '0-9')
-  REMAINING=${REMAINING:-99}  # Guard: empty string → assume 99 (not done)
+    REMAINING=$(python3 "$_tmp_plane" 2>/dev/null || echo 99)
+    rm -f "$_tmp_plane"
+    REMAINING=$(echo "$REMAINING" | tr -dc '0-9')
+    REMAINING=${REMAINING:-99}
+  fi
 
   if [[ "$REMAINING" -gt 0 ]]; then
     log_info "Sprint not complete: ${REMAINING} non-done tickets remaining"
@@ -1011,14 +1036,28 @@ daily_health_digest() {
   [[ "$HOUR" -lt 7 ]] && return
   
   local DONE_COUNT IN_PROGRESS_COUNT BLOCKED_COUNT TOTAL_COUNT
-  DONE_COUNT=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels = 'sprint-active' AND statusCategory = 'Done'" "50" 2>/dev/null | wc -l || echo 0)
-  TOTAL_COUNT=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels = 'sprint-active'" "50" 2>/dev/null | wc -l || echo 0)
-  BLOCKED_COUNT=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels IN ('blocked','needs-human-review')" "50" 2>/dev/null | wc -l || echo 0)
-  IN_PROGRESS_COUNT=$((TOTAL_COUNT - DONE_COUNT))
-  
-  DONE_COUNT=$(echo "$DONE_COUNT" | tr -d ' ')
-  TOTAL_COUNT=$(echo "$TOTAL_COUNT" | tr -d ' ')
-  BLOCKED_COUNT=$(echo "$BLOCKED_COUNT" | tr -d ' ')
+  if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
+    local _cycle_id
+    _cycle_id=$(plane_get_current_cycle_id 2>/dev/null || echo "")
+    if [[ -n "$_cycle_id" ]]; then
+      local _stats
+      _stats=$(plane_get_cycle_stats "$_cycle_id" 2>/dev/null || echo '{"done":0,"in_progress":0,"todo":0,"total":0}')
+      DONE_COUNT=$(echo "$_stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('done',0))" 2>/dev/null || echo 0)
+      TOTAL_COUNT=$(echo "$_stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total',0))" 2>/dev/null || echo 0)
+      IN_PROGRESS_COUNT=$(echo "$_stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('in_progress',0))" 2>/dev/null || echo 0)
+    else
+      DONE_COUNT=0; TOTAL_COUNT=0; IN_PROGRESS_COUNT=0
+    fi
+    BLOCKED_COUNT=0
+  else
+    DONE_COUNT=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels = 'sprint-active' AND statusCategory = 'Done'" "50" 2>/dev/null | wc -l || echo 0)
+    TOTAL_COUNT=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels = 'sprint-active'" "50" 2>/dev/null | wc -l || echo 0)
+    BLOCKED_COUNT=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels IN ('blocked','needs-human-review')" "50" 2>/dev/null | wc -l || echo 0)
+    IN_PROGRESS_COUNT=$((TOTAL_COUNT - DONE_COUNT))
+    DONE_COUNT=$(echo "$DONE_COUNT" | tr -d ' ')
+    TOTAL_COUNT=$(echo "$TOTAL_COUNT" | tr -d ' ')
+    BLOCKED_COUNT=$(echo "$BLOCKED_COUNT" | tr -d ' ')
+  fi
   
   local ERROR_COUNT
   ERROR_COUNT=$(grep -c "ERROR\|FAIL" ${LOG_DIR}/cron.log 2>/dev/null || echo 0)

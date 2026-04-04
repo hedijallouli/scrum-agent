@@ -81,8 +81,20 @@ RECENT_ERRORS=$(tail -100 ${LOG_DIR}/cron.log 2>/dev/null \
   || echo "Aucune erreur récente")
 
 # Sprint ticket counts
-DONE_COUNT=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels = 'sprint-active' AND statusCategory = 'Done'" "50" 2>/dev/null | wc -l | tr -d ' ' || echo "0")
-TOTAL_COUNT=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels = 'sprint-active'" "50" 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
+  _cycle_id=$(plane_get_current_cycle_id 2>/dev/null || echo "")
+  if [[ -n "$_cycle_id" ]]; then
+    _stats=$(plane_get_cycle_stats "$_cycle_id" 2>/dev/null || echo '{"done":0,"total":0}')
+    DONE_COUNT=$(echo "$_stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('done',0))" 2>/dev/null || echo "0")
+    TOTAL_COUNT=$(echo "$_stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total',0))" 2>/dev/null || echo "0")
+  else
+    DONE_COUNT="0"
+    TOTAL_COUNT="0"
+  fi
+else
+  DONE_COUNT=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels = 'sprint-active' AND statusCategory = 'Done'" "50" 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+  TOTAL_COUNT=$(jira_search_keys "project = ${JIRA_PROJECT} AND labels = 'sprint-active'" "50" 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+fi
 
 SPRINT_PD=$(sum_sprint_person_days)
 CURRENT_VELOCITY=$(get_velocity)

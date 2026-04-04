@@ -46,11 +46,43 @@ log_info "Sprint number: $SPRINT_NUM"
 # ── Gather Done tickets this sprint ──────────────────────────────────────────
 log_info "Fetching Done tickets..."
 
-DONE_TICKETS_RAW=$(jira_search_keys_with_summaries \
-  "project = ${PROJECT_KEY} AND statusCategory = 'Done' AND labels = 'sprint-active'" \
-  "50" 2>/dev/null || echo "")
+if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]] && declare -f plane_get_current_cycle_id &>/dev/null; then
+  _cycle_id=$(plane_get_current_cycle_id 2>/dev/null || echo "")
+  if [[ -n "$_cycle_id" ]]; then
+    # Get cycle issues that are in completed state group
+    DONE_TICKETS_RAW=$(python3 - "$_cycle_id" << 'PYEOF'
+import os, sys, requests
+cycle_id = sys.argv[1]
+pkey = os.environ.get('JIRA_PROJECT', os.environ.get('PROJECT_KEY', 'CDO'))
+base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
+ws = os.environ.get('PLANE_WORKSPACE_SLUG','')
+pid = os.environ.get('PLANE_PROJECT_ID','')
+key = os.environ.get('PLANE_API_KEY','')
+h = {'X-API-Key': key}
+try:
+    sr = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/states/', headers=h, timeout=10)
+    state_group = {s['id']: s.get('group','') for s in sr.json().get('results', [])}
+    cr = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/{cycle_id}/cycle-issues/?per_page=200', headers=h, timeout=10)
+    cycle_issues = cr.json().get('results', cr.json()) if isinstance(cr.json(), dict) else cr.json()
+    issue_uuids = {ci.get('issue') or ci.get('id') for ci in cycle_issues}
+    ir = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=200', headers=h, timeout=10)
+    for i in ir.json().get('results', []):
+        if i['id'] in issue_uuids and state_group.get(i.get('state','')) == 'completed':
+            print(f"{pkey}-{i.get('sequence_id',0)}|{i.get('name','')}")
+except Exception as e:
+    print(f'error: {e}', file=sys.stderr)
+PYEOF
+    )
+  else
+    DONE_TICKETS_RAW=""
+  fi
+else
+  DONE_TICKETS_RAW=$(jira_search_keys_with_summaries \
+    "project = ${PROJECT_KEY} AND statusCategory = 'Done' AND labels = 'sprint-active'" \
+    "50" 2>/dev/null || echo "")
+fi
 
-# If sprint-active label not in use, fall back to all Done tickets
+# Fallback to all Done tickets if empty
 if [[ -z "$DONE_TICKETS_RAW" ]]; then
   DONE_TICKETS_RAW=$(jira_search_keys_with_summaries \
     "project = ${PROJECT_KEY} AND statusCategory = 'Done'" \

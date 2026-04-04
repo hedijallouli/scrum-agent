@@ -141,6 +141,167 @@ requests.patch(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/{issue["id"
 PYEOF
   }
 
+  # ─── Plane Cycle Management ──────────────────────────────────────────────────
+
+  # Create a new Plane cycle (sprint)
+  # Usage: plane_create_cycle "Sprint 2" "2026-04-04" "2026-04-11"
+  # Returns: cycle UUID
+  plane_create_cycle() {
+    local name="$1" start_date="$2" end_date="$3"
+    python3 - "$name" "$start_date" "$end_date" << 'PYEOF'
+import json, os, sys, requests
+name, start_date, end_date = sys.argv[1], sys.argv[2], sys.argv[3]
+base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
+ws = os.environ.get('PLANE_WORKSPACE_SLUG','')
+pid = os.environ.get('PLANE_PROJECT_ID','')
+key = os.environ.get('PLANE_API_KEY','')
+h = {'X-API-Key': key, 'Content-Type': 'application/json'}
+r = requests.post(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/',
+    headers=h, json={'name': name, 'start_date': start_date, 'end_date': end_date}, timeout=15)
+if r.status_code in (200, 201):
+    print(r.json().get('id', ''))
+else:
+    print(f'plane_create_cycle error: {r.status_code} {r.text[:200]}', file=sys.stderr)
+PYEOF
+  }
+
+  # Add issues to a Plane cycle (bulk)
+  # Usage: plane_add_issues_to_cycle <cycle_id> CDO-3 CDO-4 CDO-5
+  plane_add_issues_to_cycle() {
+    local cycle_id="$1"; shift
+    local keys=("$@")
+    # Pass keys as space-separated arg
+    python3 - "$cycle_id" "${keys[*]}" << 'PYEOF'
+import json, os, sys, requests
+cycle_id = sys.argv[1]
+keys = sys.argv[2].split()
+base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
+ws = os.environ.get('PLANE_WORKSPACE_SLUG','')
+pid = os.environ.get('PLANE_PROJECT_ID','')
+key = os.environ.get('PLANE_API_KEY','')
+h = {'X-API-Key': key, 'Content-Type': 'application/json'}
+# Resolve ticket keys to issue UUIDs
+r = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=200', headers=h, timeout=15)
+issues = r.json().get('results', [])
+seq_to_uuid = {i.get('sequence_id'): i['id'] for i in issues}
+uuids = []
+for k in keys:
+    try:
+        seq = int(k.split('-')[-1])
+        if seq in seq_to_uuid:
+            uuids.append(seq_to_uuid[seq])
+    except ValueError:
+        pass
+if uuids:
+    r2 = requests.post(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/{cycle_id}/cycle-issues/',
+        headers=h, json={'issues': uuids}, timeout=15)
+    if r2.status_code not in (200, 201):
+        print(f'plane_add_issues_to_cycle error: {r2.status_code}', file=sys.stderr)
+    else:
+        print(f'Added {len(uuids)} issues to cycle', file=sys.stderr)
+PYEOF
+  }
+
+  # Get issues in a Plane cycle
+  # Usage: plane_get_cycle_issues <cycle_id>
+  # Output: CDO-3|Extract React components...  (one per line)
+  plane_get_cycle_issues() {
+    local cycle_id="$1"
+    [[ -z "$cycle_id" ]] && return 0
+    python3 - "$cycle_id" << 'PYEOF'
+import json, os, sys, requests
+cycle_id = sys.argv[1]
+project_key = os.environ.get('JIRA_PROJECT', os.environ.get('PROJECT_KEY', 'CDO'))
+base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
+ws = os.environ.get('PLANE_WORKSPACE_SLUG','')
+pid = os.environ.get('PLANE_PROJECT_ID','')
+key = os.environ.get('PLANE_API_KEY','')
+h = {'X-API-Key': key, 'Content-Type': 'application/json'}
+try:
+    # Get cycle issues (returns cycle-issue join objects with 'issue' UUID)
+    cr = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/{cycle_id}/cycle-issues/?per_page=200',
+        headers=h, timeout=15)
+    cycle_issues = cr.json().get('results', cr.json()) if isinstance(cr.json(), dict) else cr.json()
+    issue_uuids = {ci.get('issue') or ci.get('id') for ci in cycle_issues}
+    # Get all project issues to resolve UUIDs to seq+name
+    ir = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=200', headers=h, timeout=15)
+    issues = ir.json().get('results', [])
+    for issue in issues:
+        if issue['id'] in issue_uuids:
+            seq = issue.get('sequence_id', 0)
+            name = issue.get('name', '')
+            print(f'{project_key}-{seq}|{name}')
+except Exception as e:
+    print(f'plane_get_cycle_issues error: {e}', file=sys.stderr)
+PYEOF
+  }
+
+  # Get cycle issue stats (done/in_progress/todo/total)
+  # Usage: plane_get_cycle_stats <cycle_id>
+  # Output: JSON {"done": N, "in_progress": N, "todo": N, "total": N}
+  plane_get_cycle_stats() {
+    local cycle_id="$1"
+    [[ -z "$cycle_id" ]] && echo '{"done":0,"in_progress":0,"todo":0,"total":0}' && return 0
+    python3 - "$cycle_id" << 'PYEOF'
+import json, os, sys, requests
+cycle_id = sys.argv[1]
+base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
+ws = os.environ.get('PLANE_WORKSPACE_SLUG','')
+pid = os.environ.get('PLANE_PROJECT_ID','')
+key = os.environ.get('PLANE_API_KEY','')
+h = {'X-API-Key': key, 'Content-Type': 'application/json'}
+try:
+    sr = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/states/', headers=h, timeout=15)
+    states = sr.json().get('results', sr.json()) if isinstance(sr.json(), dict) else sr.json()
+    state_group = {s['id']: s.get('group', '') for s in states}
+    cr = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/{cycle_id}/cycle-issues/?per_page=200',
+        headers=h, timeout=15)
+    cycle_issues = cr.json().get('results', cr.json()) if isinstance(cr.json(), dict) else cr.json()
+    issue_uuids = {ci.get('issue') or ci.get('id') for ci in cycle_issues}
+    ir = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=200', headers=h, timeout=15)
+    issues = ir.json().get('results', [])
+    done = in_progress = todo = 0
+    for issue in issues:
+        if issue['id'] not in issue_uuids:
+            continue
+        grp = state_group.get(issue.get('state', ''), '')
+        if grp == 'completed':
+            done += 1
+        elif grp == 'started':
+            in_progress += 1
+        elif grp != 'cancelled':
+            todo += 1
+    print(json.dumps({'done': done, 'in_progress': in_progress, 'todo': todo, 'total': done + in_progress + todo}))
+except Exception as e:
+    print(json.dumps({'done': 0, 'in_progress': 0, 'todo': 0, 'total': 0}))
+    print(f'plane_get_cycle_stats error: {e}', file=sys.stderr)
+PYEOF
+  }
+
+  # Remove an issue from a Plane cycle
+  # Usage: plane_remove_issue_from_cycle <cycle_id> CDO-3
+  plane_remove_issue_from_cycle() {
+    local cycle_id="$1" ticket_key="$2"
+    local seq_num="${ticket_key##*-}"
+    python3 - "$cycle_id" "$seq_num" << 'PYEOF'
+import os, sys, requests
+cycle_id, seq = sys.argv[1], int(sys.argv[2])
+base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
+ws = os.environ.get('PLANE_WORKSPACE_SLUG','')
+pid = os.environ.get('PLANE_PROJECT_ID','')
+key = os.environ.get('PLANE_API_KEY','')
+h = {'X-API-Key': key, 'Content-Type': 'application/json'}
+r = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=200', headers=h, timeout=15)
+issues = r.json().get('results', [])
+issue = next((x for x in issues if x.get('sequence_id') == seq), None)
+if issue:
+    requests.delete(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/{cycle_id}/cycle-issues/{issue["id"]}/',
+        headers=h, timeout=15)
+PYEOF
+  }
+
+  # ─── End Plane Cycle Management ────────────────────────────────────────────
+
   # Get tickets assigned to a specific agent (sprint-active, not done, not blocked)
   # Usage: plane_get_assigned_tickets youssef 3
   plane_get_assigned_tickets() {

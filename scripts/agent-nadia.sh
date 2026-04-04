@@ -211,17 +211,26 @@ QUALITY_REPORT="## Quality Checks
 log_info "$QUALITY_REPORT"
 
 # ─── 6. Fetch sprint context for cross-ticket awareness ────────────────────
-SPRINT_CONTEXT=$(curl -s -X POST \
-  -H "Authorization: Basic $(jira_auth)" \
-  -H "Content-Type: application/json" \
-  "${JIRA_BASE_URL}/rest/api/3/search/jql" \
-  -d "{\"jql\":\"project=${JIRA_PROJECT} AND labels='sprint-active' AND key != '${TICKET_KEY}' AND statusCategory != 'Done'\",\"fields\":[\"summary\"],\"maxResults\":10}" \
-  | python3 -c "
+if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
+  _cycle_id=$(plane_get_current_cycle_id 2>/dev/null || echo "")
+  if [[ -n "$_cycle_id" ]]; then
+    SPRINT_CONTEXT=$(plane_get_cycle_issues "$_cycle_id" 2>/dev/null | grep -v "^${TICKET_KEY}|" | sed 's/|/: /' | sed 's/^/- /' || echo "Could not fetch sprint context")
+  else
+    SPRINT_CONTEXT="No active cycle"
+  fi
+else
+  SPRINT_CONTEXT=$(curl -s -X POST \
+    -H "Authorization: Basic $(jira_auth)" \
+    -H "Content-Type: application/json" \
+    "${JIRA_BASE_URL}/rest/api/3/search/jql" \
+    -d "{\"jql\":\"project=${JIRA_PROJECT} AND labels='sprint-active' AND key != '${TICKET_KEY}' AND statusCategory != 'Done'\",\"fields\":[\"summary\"],\"maxResults\":10}" \
+    | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 for i in d.get('issues',[]):
     print(f\"- {i['key']}: {i['fields']['summary']}\")
 " 2>/dev/null || echo "Could not fetch sprint context")
+fi
 
 log_info "Sprint context:\n${SPRINT_CONTEXT}"
 

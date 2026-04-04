@@ -367,7 +367,12 @@ while IFS= read -r line; do
         ;;
       DEPRIORITIZE)
         jira_add_label "$TICKET" "deprioritized" 2>/dev/null || true
-        jira_remove_label "$TICKET" "sprint-active" 2>/dev/null || true
+        if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
+          _cycle_id=$(plane_get_current_cycle_id 2>/dev/null || echo "")
+          [[ -n "$_cycle_id" ]] && plane_remove_issue_from_cycle "$_cycle_id" "$TICKET" 2>/dev/null || true
+        else
+          jira_remove_label "$TICKET" "sprint-active" 2>/dev/null || true
+        fi
         blacklist_ticket "$TICKET" "Deprioritized by Salma at standup" 2>/dev/null || true
         jira_add_rich_comment "$TICKET" "salma" "INFO" "Standup decision: déprioritisé. ${REASON}" 2>/dev/null || true
         log_info "Executed: ${TICKET} → deprioritized"

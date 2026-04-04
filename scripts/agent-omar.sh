@@ -341,23 +341,15 @@ SPRINT_COMPLETION_FLAG="/tmp/${PROJECT_PREFIX}-sprint-complete-$(date +%Y-%m-%d)
 
 if [[ ! -f "$SPRINT_COMPLETION_FLAG" ]]; then
   if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
-    SPRINT_TOTAL=$(python3 - << 'SPYEOF' 2>/dev/null || echo "0/0"
-import os, requests
-base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
-ws   = os.environ.get('PLANE_WORKSPACE_SLUG','')
-pid  = os.environ.get('PLANE_PROJECT_ID','')
-key  = os.environ.get('PLANE_API_KEY','')
-h    = {'X-API-Key': key}
-sr = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/states/', headers=h, timeout=10)
-states = sr.json().get('results', [])
-done_ids = {s['id'] for s in states if s.get('group') == 'completed'}
-r = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=200', headers=h, timeout=15)
-issues = r.json().get('results', [])
-total = len(issues)
-done = sum(1 for i in issues if i.get('state') in done_ids)
-print(f'{done}/{total}')
-SPYEOF
-)
+    _cycle_id=$(plane_get_current_cycle_id 2>/dev/null || echo "")
+    if [[ -n "$_cycle_id" ]]; then
+      _stats=$(plane_get_cycle_stats "$_cycle_id" 2>/dev/null || echo '{"done":0,"total":0}')
+      _done=$(echo "$_stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('done',0))" 2>/dev/null || echo 0)
+      _total=$(echo "$_stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total',0))" 2>/dev/null || echo 0)
+      SPRINT_TOTAL="${_done}/${_total}"
+    else
+      SPRINT_TOTAL="0/0"
+    fi
   else
     SPRINT_TOTAL=$(jira_search "project = ${JIRA_PROJECT} AND labels = 'sprint-active'" "50" | python3 -c "
 import sys,json
@@ -521,8 +513,23 @@ if [[ ! -f "$DASHBOARD_FLAG" ]]; then
   TEAM_VELOCITY=$(get_velocity)
   BUDGET_INFO=$(get_budget_status 2>/dev/null || echo "No data")
 
-  # Count sprint stats from Jira
-  SPRINT_STATS=$(jira_search "project = ${JIRA_PROJECT} AND labels = 'sprint-active'" "50" | python3 -c "
+  # Count sprint stats
+  if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
+    _cycle_id=$(plane_get_current_cycle_id 2>/dev/null || echo "")
+    if [[ -n "$_cycle_id" ]]; then
+      _cs=$(plane_get_cycle_stats "$_cycle_id" 2>/dev/null || echo '{"done":0,"in_progress":0,"todo":0,"total":0}')
+      SPRINT_STATS=$(echo "$_cs" | python3 -c "
+import sys,json
+d=json.load(sys.stdin)
+d['inprog']=d.pop('in_progress',0)
+d['pct']=round(d['done']*100/d['total']) if d.get('total',0)>0 else 0
+print(json.dumps(d))
+" 2>/dev/null || echo '{"done":0,"inprog":0,"todo":0,"total":0,"pct":0}')
+    else
+      SPRINT_STATS='{"done":0,"inprog":0,"todo":0,"total":0,"pct":0}'
+    fi
+  else
+    SPRINT_STATS=$(jira_search "project = ${JIRA_PROJECT} AND labels = 'sprint-active'" "50" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 issues=d.get('issues',[])
@@ -533,6 +540,7 @@ todo=total-done-inprog
 pct=round(done*100/total) if total>0 else 0
 print(json.dumps({'done':done,'inprog':inprog,'todo':todo,'total':total,'pct':pct}))
 " 2>/dev/null || echo '{"done":0,"inprog":0,"todo":0,"total":0,"pct":0}')
+  fi
 
   DONE_N=$(echo "$SPRINT_STATS" | python3 -c "import sys,json; print(json.load(sys.stdin)['done'])" 2>/dev/null || echo 0)
   INPROG_N=$(echo "$SPRINT_STATS" | python3 -c "import sys,json; print(json.load(sys.stdin)['inprog'])" 2>/dev/null || echo 0)

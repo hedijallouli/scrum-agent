@@ -21,7 +21,16 @@ if [[ -f "$DAILY_FLAG" ]]; then
 fi
 
 # ─── 1. Gather sprint context ────────────────────────────────────────────────
-SPRINT_TICKETS=$(jira_search_keys_with_summaries "project = ${JIRA_PROJECT} AND labels = 'sprint-active' AND statusCategory != 'Done'" "20" 2>/dev/null || true)
+if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]]; then
+  _cycle_id=$(plane_get_current_cycle_id 2>/dev/null || echo "")
+  if [[ -n "$_cycle_id" ]]; then
+    SPRINT_TICKETS=$(plane_get_cycle_issues "$_cycle_id" 2>/dev/null || true)
+  else
+    SPRINT_TICKETS=""
+  fi
+else
+  SPRINT_TICKETS=$(jira_search_keys_with_summaries "project = ${JIRA_PROJECT} AND labels = 'sprint-active' AND statusCategory != 'Done'" "20" 2>/dev/null || true)
+fi
 
 SPRINT_CONTEXT=""
 if [[ -n "$SPRINT_TICKETS" ]]; then

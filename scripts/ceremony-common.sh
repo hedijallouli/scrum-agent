@@ -383,45 +383,65 @@ try:
 except Exception:
     state_group = {}
 
-# ── sprint-active label UUID ──────────────────────────────────────────────────
-try:
-    r4 = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/labels/?per_page=100',
-                      headers=h, timeout=timeout)
-    labels_raw = r4.json()
-    if isinstance(labels_raw, dict):
-        labels_raw = labels_raw.get('results', [])
-    sprint_active_id = next(
-        (l['id'] for l in labels_raw if l.get('name') == 'sprint-active'), None)
-except Exception:
-    sprint_active_id = None
-
-# ── Issue counts ──────────────────────────────────────────────────────────────
-try:
-    r2 = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=250',
-                      headers=h, timeout=timeout)
-    issues = r2.json()
-    if isinstance(issues, dict):
-        issues = issues.get('results', [])
-except Exception:
-    issues = []
-
+# ── Issue counts (cycle-based) ────────────────────────────────────────────────
 done_count   = 0
 inprog_count = 0
 todo_count   = 0
 
-for issue in issues:
-    if sprint_active_id:
-        raw_labels = issue.get('label_detail', []) or issue.get('labels', [])
-        label_ids  = [(l['id'] if isinstance(l, dict) else l) for l in raw_labels]
-        if sprint_active_id not in label_ids:
-            continue
-    grp = state_group.get(issue.get('state', ''), '')
-    if grp == 'completed':
-        done_count += 1
-    elif grp == 'started':
-        inprog_count += 1
-    else:
-        todo_count += 1
+if active_cycle:
+    # Use cycle membership instead of sprint-active label
+    cycle_id = active_cycle['id']
+    try:
+        rc = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/{cycle_id}/cycle-issues/',
+                          headers=h, timeout=timeout)
+        cycle_issues_raw = rc.json()
+        if isinstance(cycle_issues_raw, dict):
+            cycle_issues_raw = cycle_issues_raw.get('results', [])
+        # Get issue details for state lookup
+        ri = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=250',
+                          headers=h, timeout=timeout)
+        all_issues = ri.json()
+        if isinstance(all_issues, dict):
+            all_issues = all_issues.get('results', [])
+        issue_map = {i['id']: i for i in all_issues}
+        cycle_issue_ids = set()
+        for ci in cycle_issues_raw:
+            iid = ci.get('issue') or ci.get('issue_detail', {}).get('id', '')
+            if iid:
+                cycle_issue_ids.add(iid)
+        for iid in cycle_issue_ids:
+            issue = issue_map.get(iid, {})
+            grp = state_group.get(issue.get('state', ''), '')
+            if grp == 'cancelled':
+                continue
+            elif grp == 'completed':
+                done_count += 1
+            elif grp == 'started':
+                inprog_count += 1
+            else:
+                todo_count += 1
+    except Exception:
+        pass
+else:
+    # Fallback: count all non-cancelled project issues
+    try:
+        r2 = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=250',
+                          headers=h, timeout=timeout)
+        issues = r2.json()
+        if isinstance(issues, dict):
+            issues = issues.get('results', [])
+        for issue in issues:
+            grp = state_group.get(issue.get('state', ''), '')
+            if grp == 'cancelled':
+                continue
+            elif grp == 'completed':
+                done_count += 1
+            elif grp == 'started':
+                inprog_count += 1
+            else:
+                todo_count += 1
+    except Exception:
+        pass
 
 total    = done_count + inprog_count + todo_count
 velocity = round(done_count * 100 / total) if total > 0 else 0
@@ -548,15 +568,17 @@ PYEOF
 
 # ─── plane_update_cycle_description ──────────────────────────────────────────
 # Overwrites the description field of the current active Plane cycle.
-# Usage: plane_update_cycle_description "Sprint goal text"
+# Usage: plane_update_cycle_description "Sprint goal text" [cycle_id]
 plane_update_cycle_description() {
   local description="$1"
+  local cycle_id="${2:-}"
   if [[ "${TRACKER_BACKEND:-jira}" != "plane" ]]; then
     log_info "Tracker is not Plane — skipping cycle description update"
     return 0
   fi
-  local cycle_id
-  cycle_id=$(plane_get_current_cycle_id)
+  if [[ -z "$cycle_id" ]]; then
+    cycle_id=$(plane_get_current_cycle_id)
+  fi
   if [[ -z "$cycle_id" ]]; then
     log_info "No active Plane cycle found — skipping description update"
     return 0

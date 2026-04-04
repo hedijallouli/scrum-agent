@@ -325,6 +325,20 @@ log_info "Sprint goal: ${SPRINT_GOAL_CLEAN}"
 # ─────────────────────────────────────────────────────────────────────────────
 log_info "Assigning tickets in Plane..."
 
+# ── Create Plane cycle for this sprint ───────────────────────────────────────
+NEW_CYCLE_ID=""
+if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]] && declare -f plane_create_cycle &>/dev/null; then
+  SPRINT_NUM=$(cat "${DATA_DIR}/sprints/current-sprint-num.txt" 2>/dev/null || echo "1")
+  CYCLE_START=$(date -u +%Y-%m-%d)
+  CYCLE_END=$(date -u -d "+7 days" +%Y-%m-%d 2>/dev/null || date -u -v+7d +%Y-%m-%d 2>/dev/null || date -u +%Y-%m-%d)
+  NEW_CYCLE_ID=$(plane_create_cycle "Sprint ${SPRINT_NUM}" "$CYCLE_START" "$CYCLE_END" 2>/dev/null || echo "")
+  if [[ -n "$NEW_CYCLE_ID" ]]; then
+    log_info "Created Plane cycle: Sprint ${SPRINT_NUM} (${NEW_CYCLE_ID})"
+  else
+    log_info "Plane cycle creation failed — falling back to sprint-active labels"
+  fi
+fi
+
 DEV_TICKETS=()
 QA_TICKETS=()
 ASSIGNED_COUNT=0
@@ -341,13 +355,13 @@ while IFS='|' read -r ticket_key summary; do
     QA_TICKETS+=("$ticket_key")
     plane_assign_ticket "$ticket_key" "nadia" 2>/dev/null || true
     jira_add_label "$ticket_key" "agent:nadia" 2>/dev/null || true
-    jira_add_label "$ticket_key" "sprint-active" 2>/dev/null || true
+    [[ -z "${NEW_CYCLE_ID:-}" ]] && jira_add_label "$ticket_key" "sprint-active" 2>/dev/null || true
     log_info "Assigned ${ticket_key} → nadia (QA)"
   else
     DEV_TICKETS+=("$ticket_key")
     plane_assign_ticket "$ticket_key" "youssef" 2>/dev/null || true
     jira_add_label "$ticket_key" "agent:youssef" 2>/dev/null || true
-    jira_add_label "$ticket_key" "sprint-active" 2>/dev/null || true
+    [[ -z "${NEW_CYCLE_ID:-}" ]] && jira_add_label "$ticket_key" "sprint-active" 2>/dev/null || true
     # Ensure it goes through Salma enrichment if not already enriched
     TICKET_LABELS=$(jira_get_ticket_field "$ticket_key" "labels" 2>/dev/null || echo "")
     if ! echo "$TICKET_LABELS" | grep -q "enriched"; then
@@ -367,6 +381,15 @@ done <<< "$(echo "$BACKLOG_RAW" | while IFS='|' read -r key sum; do echo "${key}
 
 log_info "Assigned ${ASSIGNED_COUNT} tickets: ${#DEV_TICKETS[@]} dev (Youssef), ${#QA_TICKETS[@]} QA (Nadia)"
 
+# ── Add tickets to Plane cycle ───────────────────────────────────────────────
+if [[ -n "${NEW_CYCLE_ID:-}" ]] && declare -f plane_add_issues_to_cycle &>/dev/null; then
+  ALL_SPRINT_KEYS=("${DEV_TICKETS[@]}" "${QA_TICKETS[@]}")
+  if [[ ${#ALL_SPRINT_KEYS[@]} -gt 0 ]]; then
+    plane_add_issues_to_cycle "$NEW_CYCLE_ID" "${ALL_SPRINT_KEYS[@]}" 2>/dev/null || true
+    log_info "Added ${#ALL_SPRINT_KEYS[@]} tickets to cycle ${NEW_CYCLE_ID}"
+  fi
+fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 # UPDATE PLANE CYCLE DESCRIPTION WITH SPRINT GOAL
 # ─────────────────────────────────────────────────────────────────────────────
@@ -377,8 +400,13 @@ Capacité: ${ADJUSTED_CAPACITY} PD | Vélocité: ${SPRINT_VELOCITY}
 Tickets planifiés: ${ASSIGNED_COUNT} | PD estimés: ${PD_TOTAL}
 Dev (Youssef): ${#DEV_TICKETS[@]} tickets | QA (Nadia): ${#QA_TICKETS[@]} tickets"
 
-plane_update_cycle_description "$CYCLE_DESCRIPTION" 2>/dev/null || \
-  log_info "Cycle description update skipped (not Plane or no active cycle)"
+if [[ -n "${NEW_CYCLE_ID:-}" ]]; then
+  plane_update_cycle_description "$CYCLE_DESCRIPTION" "$NEW_CYCLE_ID" 2>/dev/null || \
+    log_info "Cycle description update failed"
+else
+  plane_update_cycle_description "$CYCLE_DESCRIPTION" 2>/dev/null || \
+    log_info "Cycle description update skipped (not Plane or no active cycle)"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # OMAR FERME LE PLANNING
