@@ -695,7 +695,8 @@ except Exception:
 PLANE_PYEOF
   REMAINING=$(python3 "$_tmp_plane" 2>/dev/null || echo 99)
   rm -f "$_tmp_plane"
-  REMAINING=$(echo "$REMAINING" | tr -d ' ')
+  REMAINING=$(echo "$REMAINING" | tr -dc '0-9')
+  REMAINING=${REMAINING:-99}  # Guard: empty string → assume 99 (not done)
 
   if [[ "$REMAINING" -gt 0 ]]; then
     log_info "Sprint not complete: ${REMAINING} non-done tickets remaining"
