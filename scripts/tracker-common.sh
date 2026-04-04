@@ -193,9 +193,9 @@ for issue in issues:
     # Must be assigned to this agent
     assignees = issue.get('assignees', [])
     if user_id not in assignees: continue
-    # Must not be in a completed state group
+    # Must not be in a completed or cancelled state group
     s_id = issue.get('state','')
-    if state_group.get(s_id, '') == 'completed': continue
+    if state_group.get(s_id, '') in ('completed', 'cancelled'): continue
     # Skip Blocked / Needs Human states (replaces old label-based checks)
     if state_name.get(s_id,'') in SKIP_STATE_NAMES: continue
     # Agent-role state guard: skip tickets in states outside this agent's lane
