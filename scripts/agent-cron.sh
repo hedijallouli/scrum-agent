@@ -708,7 +708,7 @@ try:
     r  = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/states/', headers=h, timeout=15)
     states = r.json()
     if isinstance(states, dict): states = states.get('results', [])
-    active_ids = {s['id'] for s in states if s.get('group') in ('started', 'unstarted')}
+    active_ids = {s['id'] for s in states if s.get('group') in ('started', 'unstarted', 'backlog')}
     r2 = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=250', headers=h, timeout=15)
     issues = r2.json()
     if isinstance(issues, dict): issues = issues.get('results', [])
