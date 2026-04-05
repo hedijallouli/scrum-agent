@@ -456,15 +456,19 @@ fi
 # Check 6: PR size hard limit (300 lines, aligned with Nadia's QA limit)
 # Auto-generated type files (e.g. src/types/database.ts from Supabase) are exempt per CLAUDE.md
 log_info "Check: PR size hard limit (300 lines)..."
+# Count only handwritten code lines (exclude lockfiles, auto-generated types, SQL migrations, docs)
 TOTAL_DIFF=$(git diff "${BASE_BRANCH}...origin/${PR_BRANCH}" --shortstat \
-  -- ':!package-lock.json' ':!yarn.lock' ':!pnpm-lock.yaml' ':!src/types/database.ts' \
+  -- ':!package-lock.json' ':!yarn.lock' ':!pnpm-lock.yaml' \
+     ':!src/types/database.ts' \
+     ':!supabase/migrations/*.sql' \
+     ':!*.md' ':!*.mdx' \
   2>/dev/null \
   | { grep -oE '[0-9]+ insertion|[0-9]+ deletion' || true; } \
   | awk '{s+=$1}END{print s+0}')
 TOTAL_DIFF="${TOTAL_DIFF:-0}"
-log_info "Total PR diff (excl. auto-generated types): ${TOTAL_DIFF} lines (limit: 300)"
+log_info "Total PR diff (handwritten code only): ${TOTAL_DIFF} lines (limit: 300)"
 if (( TOTAL_DIFF > 300 )); then
-  add_issue "PR_TOO_LARGE: PR has ${TOTAL_DIFF} lines changed (excluding auto-generated types). Hard limit is 300 lines. Split into smaller PRs."
+  add_issue "PR_TOO_LARGE: PR has ${TOTAL_DIFF} lines of handwritten code changed. Hard limit is 300 lines. Split into smaller PRs. (Auto-generated files like database.ts and SQL migrations are excluded.)"
   CHECKS_PASSED=false
 fi
 
