@@ -334,6 +334,8 @@ if [[ "${TRACKER_BACKEND:-jira}" == "plane" ]] && declare -f plane_create_cycle 
   NEW_CYCLE_ID=$(plane_create_cycle "Sprint ${SPRINT_NUM}" "$CYCLE_START" "$CYCLE_END" 2>/dev/null || echo "")
   if [[ -n "$NEW_CYCLE_ID" ]]; then
     log_info "Created Plane cycle: Sprint ${SPRINT_NUM} (${NEW_CYCLE_ID})"
+    # Increment sprint number for next planning run
+    echo $((SPRINT_NUM + 1)) > "${DATA_DIR}/sprints/current-sprint-num.txt" 2>/dev/null || true
   else
     log_info "Plane cycle creation failed — falling back to sprint-active labels"
   fi
