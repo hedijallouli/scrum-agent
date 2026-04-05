@@ -360,7 +360,7 @@ state_name  = {s['id']: s.get('name','') for s in state_list}
 # Agent-specific allowed states (prevent cross-role ticket pollution)
 # e.g. Youssef must NOT pick up "In Review" tickets (Nadia's domain)
 AGENT_ALLOWED_STATES = {
-    'salma':   {'In Progress', 'Todo'},
+    'salma':   {'Backlog', 'In Progress', 'Todo'},
     'youssef': {'In Progress', 'Ready'},
     'nadia':   {'In Review'},
     'rami':    {'In Progress', 'QA'},
