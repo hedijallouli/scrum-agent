@@ -32,6 +32,12 @@ LOG_FILE="${LOG_DIR}/ceremony-planning-$(date '+%Y-%m-%dT%H:%M:%S').log"
 mkdir -p ${LOG_DIR}
 log_info "=== Sprint Planning Starting ==="
 
+# ── Set ceremony flag to prevent false ceremony triggers while planning runs ──
+# (The cron's sprint-completion check fires if it finds the previous cycle done
+#  before the new cycle is created. Setting the flag early prevents this.)
+CEREMONY_FLAG="/tmp/${PROJECT_PREFIX}-ceremony-done-$(date -u +%Y%m%d)"
+touch "$CEREMONY_FLAG" 2>/dev/null || true
+
 # ─────────────────────────────────────────────────────────────────────────────
 # GATHER BACKLOG + CAPACITY + VELOCITY
 # ─────────────────────────────────────────────────────────────────────────────
