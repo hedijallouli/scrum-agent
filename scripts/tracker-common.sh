@@ -944,15 +944,22 @@ PYEOF
   plane_get_unassigned_todo() {
     local project_key="${JIRA_PROJECT:-BISB}"
     local todo_state_id="${STATE_TODO:-0cdf8a6f-61d7-478f-b90d-123c3d40c59a}"
+    local backlog_state_id="${STATE_BACKLOG:-}"
     local blocked_label="blocked"
     local needs_human_label="needs-human"
 
-    python3 - "$project_key" "$todo_state_id" "$blocked_label" "$needs_human_label" << 'PYEOF'
+    python3 - "$project_key" "$todo_state_id" "$backlog_state_id" "$blocked_label" "$needs_human_label" << 'PYEOF'
 import json, os, sys, requests
 project_key = sys.argv[1]
 todo_state_id = sys.argv[2]
-blocked_label = sys.argv[3]
-needs_human_label = sys.argv[4]
+backlog_state_id = sys.argv[3]
+# Rebuild remaining argv offsets
+blocked_label = sys.argv[4]
+needs_human_label = sys.argv[5]
+# Accept both Todo and Backlog states
+valid_states = {todo_state_id}
+if backlog_state_id:
+    valid_states.add(backlog_state_id)
 base = os.environ.get('PLANE_BASE_URL', '').rstrip('/')
 ws = os.environ.get('PLANE_WORKSPACE_SLUG', '')
 pid = os.environ.get('PLANE_PROJECT_ID', '')
@@ -969,7 +976,7 @@ try:
     r = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=200', headers=h, timeout=15)
     issues = r.json().get('results', [])
     for issue in issues:
-        if issue.get('state') != todo_state_id:
+        if issue.get('state') not in valid_states:
             continue
         assignees = issue.get('assignees', [])
         if assignees:
