@@ -250,17 +250,26 @@ ws = os.environ.get('PLANE_WORKSPACE_SLUG','')
 pid = os.environ.get('PLANE_PROJECT_ID','')
 key = os.environ.get('PLANE_API_KEY','')
 h = {'X-API-Key': key, 'Content-Type': 'application/json'}
+import time
+def _get(url, h, retries=2):
+    for i in range(retries):
+        r = requests.get(url, headers=h, timeout=15)
+        if r.status_code == 200:
+            return r
+        if i < retries - 1:
+            time.sleep(5)
+    r.raise_for_status()
+    return r
 try:
-    sr = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/states/', headers=h, timeout=15)
+    sr = _get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/states/', h)
     states_data = sr.json()
     states = (states_data.get('results', []) if isinstance(states_data, dict) else states_data) if isinstance(states_data, (dict, list)) else []
     state_group = {s['id']: s.get('group', '') for s in states if isinstance(s, dict)}
-    cr = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/{cycle_id}/cycle-issues/?per_page=200',
-        headers=h, timeout=15)
+    cr = _get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/{cycle_id}/cycle-issues/?per_page=200', h)
     ci_data = cr.json()
     cycle_issues = (ci_data.get('results', []) if isinstance(ci_data, dict) else ci_data) if isinstance(ci_data, (dict, list)) else []
     issue_uuids = {(ci.get('issue') or ci.get('id')) for ci in cycle_issues if isinstance(ci, dict)}
-    ir = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=200', headers=h, timeout=15)
+    ir = _get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=200', h)
     iss_data = ir.json()
     issues = iss_data.get('results', []) if isinstance(iss_data, dict) else []
     done = in_progress = todo = 0
