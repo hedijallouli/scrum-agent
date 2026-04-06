@@ -674,6 +674,11 @@ run_sprint_ceremony_if_needed() {
   if declare -f plane_get_current_cycle_id &>/dev/null && declare -f plane_get_cycle_stats &>/dev/null; then
     local _cycle_id
     _cycle_id=$(plane_get_current_cycle_id 2>/dev/null || echo "")
+    # Fallback: use last-cycle-id file if function returned empty
+    if [[ -z "$_cycle_id" ]]; then
+      _cycle_id=$(cat "/tmp/${PROJECT_PREFIX}-last-cycle-id" 2>/dev/null || echo "")
+      [[ -n "$_cycle_id" ]] && log_info "cycle_id from last-cycle-id file: ${_cycle_id:0:8}"
+    fi
     if [[ -n "$_cycle_id" ]]; then
       local _stats
       _stats=$(plane_get_cycle_stats "$_cycle_id" 2>/dev/null || echo "")
@@ -791,6 +796,11 @@ except Exception as e:
 PYEOF
   )
 
+  # Fallback: use last-cycle-id file if inline Python returned empty
+  if [[ -z "$CURRENT_CYCLE" ]]; then
+    CURRENT_CYCLE=$(cat "/tmp/${PROJECT_PREFIX}-last-cycle-id" 2>/dev/null || echo "")
+    [[ -n "$CURRENT_CYCLE" ]] && log_info "CURRENT_CYCLE from last-cycle-id file: ${CURRENT_CYCLE:0:8}"
+  fi
   [[ -z "$CURRENT_CYCLE" ]] && { log_info "Could not determine current Plane cycle — skipping planning check"; return; }
 
   local LAST_CYCLE
