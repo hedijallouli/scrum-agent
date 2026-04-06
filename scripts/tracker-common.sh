@@ -317,27 +317,33 @@ PYEOF
   # Prints cycle UUID to stdout; empty if none found
   plane_get_current_cycle_id() {
     python3 - << 'PYEOF' 2>/dev/null
-import os, sys, requests
+import os, sys, requests, time
 base = os.environ.get('PLANE_BASE_URL', '').rstrip('/')
 ws   = os.environ.get('PLANE_WORKSPACE_SLUG', '')
 pid  = os.environ.get('PLANE_PROJECT_ID', '')
 key  = os.environ.get('PLANE_API_KEY', '')
 h    = {'X-API-Key': key, 'Content-Type': 'application/json'}
-try:
-    r = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/',
-                     headers=h, timeout=15)
-    data = r.json()
-    cycles = data.get('results', data if isinstance(data, list) else [])
-    for c in cycles:
-        if c.get('status', '').lower() in ('current', 'started', 'active'):
-            print(c['id']); sys.exit(0)
-    # Fallback: most recently started cycle by start_date
-    started = [c for c in cycles if c.get('start_date')]
-    if started:
-        started.sort(key=lambda x: x['start_date'], reverse=True)
-        print(started[0]['id'])
-except Exception as e:
-    print(f'plane_get_current_cycle_id error: {e}', file=sys.stderr)
+for attempt in range(3):
+    try:
+        r = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/',
+                         headers=h, timeout=15)
+        if r.status_code != 200:
+            raise Exception(f'HTTP {r.status_code}')
+        data = r.json()
+        cycles = data.get('results', data if isinstance(data, list) else [])
+        for c in cycles:
+            if c.get('status', '').lower() in ('current', 'started', 'active'):
+                print(c['id']); sys.exit(0)
+        # Fallback: most recently started cycle by start_date
+        started = [c for c in cycles if c.get('start_date')]
+        if started:
+            started.sort(key=lambda x: x['start_date'], reverse=True)
+            print(started[0]['id'])
+        sys.exit(0)
+    except Exception as e:
+        print(f'plane_get_current_cycle_id error (attempt {attempt+1}): {e}', file=sys.stderr)
+        if attempt < 2:
+            time.sleep(5)
 PYEOF
   }
 
