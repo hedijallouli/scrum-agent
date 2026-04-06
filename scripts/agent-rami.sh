@@ -20,7 +20,7 @@ BASE_BRANCH="${BASE_BRANCH:-dev}"
 
 TICKET_KEY="${1:?Usage: agent-rami.sh TICKET-XX}"
 MAX_RETRIES_ARCH=2   # Architecture review: 2 tries before escalating
-MAX_RETRIES_DEVOPS=3 # DevOps/merge: 3 tries before escalating
+MAX_RETRIES_DEVOPS=2 # DevOps/merge: 2 tries before escalating
 
 init_log "$TICKET_KEY" "rami"
 log_info "=== Rami (Architect + DevOps) starting for ${TICKET_KEY} ==="

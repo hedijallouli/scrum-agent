@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/agent-common.sh"
 
 TICKET_KEY="${1:?Usage: agent-salma.sh ${PROJECT_KEY:-TICKET}-XX}"
-MAX_RETRIES=3  # Allow retries for complex specs before blocking
+MAX_RETRIES=2  # 2 tries then escalate — faster failure detection
 
 init_log "$TICKET_KEY" "salma"
 log_info "=== Salma (PM) starting spec enrichment for ${TICKET_KEY} ==="

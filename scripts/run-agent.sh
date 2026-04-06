@@ -8,7 +8,7 @@ set -euo pipefail
 # Integrates: circuit breakers, dependency health, error classification,
 # exponential backoff, per-agent budgets, structured logging, poison pill,
 # event sourcing, idempotency, graceful degradation.
-MAX_RETRIES=3
+MAX_RETRIES=2
 
 TICKET_KEY="${1:?Usage: run-agent.sh TICKET_KEY AGENT_NAME}"
 AGENT="${2:?Usage: run-agent.sh TICKET_KEY AGENT_NAME}"

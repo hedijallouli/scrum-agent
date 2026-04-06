@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/agent-common.sh"
 
 TICKET_KEY="${1:?Usage: agent-karim.sh ${PROJECT_KEY:-TICKET}-XX}"
-MAX_RETRIES=3
+MAX_RETRIES=2
 
 init_log "$TICKET_KEY" "karim"
 log_info "=== Karim (DevOps) starting verification of ${TICKET_KEY} ==="

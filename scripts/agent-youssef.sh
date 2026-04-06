@@ -14,7 +14,7 @@ source "${SCRIPT_DIR}/agent-common.sh"
 BASE_BRANCH="${BASE_BRANCH:-dev}"
 
 TICKET_KEY="${1:?Usage: agent-youssef.sh ${PROJECT_KEY:-TICKET}-XX}"
-MAX_RETRIES=3
+MAX_RETRIES=2
 
 init_log "$TICKET_KEY" "youssef"
 log_info "=== Youssef (Dev) starting work on ${TICKET_KEY} ==="

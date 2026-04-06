@@ -124,6 +124,10 @@ fi
 log_info "Looking for PR..."
 cd "$PROJECT_DIR"
 
+# DEBUG: dump cron env to diagnose CDO-8 "no PR found" in cron context
+_dbg="/tmp/${PROJECT_PREFIX}-nadia-cron-env-${TICKET_KEY}-$(date +%s).txt"
+{ echo "=== ENV ==="; env | sort; echo "=== GH AUTH ==="; gh auth status 2>&1; echo "=== GH PR LIST RAW ==="; gh pr list --state open --json number,headRefName,url 2>&1 | head -20; } > "$_dbg" 2>&1
+
 PR_URL=$(find_pr_for_ticket "$TICKET_KEY")
 if [[ -z "$PR_URL" ]]; then
   log_error "No open PR found for ${TICKET_KEY}"
