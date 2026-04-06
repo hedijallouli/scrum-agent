@@ -480,7 +480,7 @@ Ticket: ${TICKET_KEY}
 Co-Authored-By: Youssef (AI) <youssef@${PROJECT_KEY,,}.ai>
 EOF
 )
-HUSKY=0 git commit -m "$COMMIT_MSG" >> "$LOG_FILE" 2>&1 || {
+HUSKY=0 git -c user.email="youssef@${PROJECT_KEY,,}.ai" -c user.name="Youssef (AI Dev Agent)" commit -m "$COMMIT_MSG" >> "$LOG_FILE" 2>&1 || {
   log_info "Commit returned non-zero — checking if already committed..."
   ALREADY_COMMITTED=$(git rev-list --count "origin/${BASE_BRANCH}..HEAD" 2>/dev/null || echo "0")
   if [[ "$ALREADY_COMMITTED" -gt 0 ]]; then
