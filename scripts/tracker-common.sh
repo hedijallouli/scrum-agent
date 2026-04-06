@@ -252,17 +252,20 @@ key = os.environ.get('PLANE_API_KEY','')
 h = {'X-API-Key': key, 'Content-Type': 'application/json'}
 try:
     sr = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/states/', headers=h, timeout=15)
-    states = sr.json().get('results', sr.json()) if isinstance(sr.json(), dict) else sr.json()
-    state_group = {s['id']: s.get('group', '') for s in states}
+    states_data = sr.json()
+    states = (states_data.get('results', []) if isinstance(states_data, dict) else states_data) if isinstance(states_data, (dict, list)) else []
+    state_group = {s['id']: s.get('group', '') for s in states if isinstance(s, dict)}
     cr = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/{cycle_id}/cycle-issues/?per_page=200',
         headers=h, timeout=15)
-    cycle_issues = cr.json().get('results', cr.json()) if isinstance(cr.json(), dict) else cr.json()
-    issue_uuids = {ci.get('issue') or ci.get('id') for ci in cycle_issues}
+    ci_data = cr.json()
+    cycle_issues = (ci_data.get('results', []) if isinstance(ci_data, dict) else ci_data) if isinstance(ci_data, (dict, list)) else []
+    issue_uuids = {(ci.get('issue') or ci.get('id')) for ci in cycle_issues if isinstance(ci, dict)}
     ir = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=200', headers=h, timeout=15)
-    issues = ir.json().get('results', [])
+    iss_data = ir.json()
+    issues = iss_data.get('results', []) if isinstance(iss_data, dict) else []
     done = in_progress = todo = 0
     for issue in issues:
-        if issue['id'] not in issue_uuids:
+        if not isinstance(issue, dict) or issue.get('id') not in issue_uuids:
             continue
         grp = state_group.get(issue.get('state', ''), '')
         if grp == 'completed':
