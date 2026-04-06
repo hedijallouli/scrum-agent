@@ -753,15 +753,16 @@ get_diff_stats() {
 find_pr_for_ticket() {
   local ticket="$1"
   cd "$PROJECT_DIR"
-  local result attempt
+  local result attempt _gh_debug
+  _gh_debug="/tmp/${PROJECT_PREFIX:-bisb}-gh-pr-debug.txt"
   for attempt in 1 2 3; do
     # Search by branch name first (preferred — exact match)
     result=$(gh pr list --state open --json number,title,headRefName,url \
-      --jq ".[] | select(.headRefName | contains(\"${ticket}\")) | .url" 2>/dev/null) || true
+      --jq ".[] | select(.headRefName | contains(\"${ticket}\")) | .url" 2>>"$_gh_debug") || true
     if [[ -z "$result" ]]; then
       # Fallback: search by PR title (handles Jira→Plane number migration)
       result=$(gh pr list --state open --json number,title,headRefName,url \
-        --jq ".[] | select(.title | contains(\"${ticket}\")) | .url" 2>/dev/null) || true
+        --jq ".[] | select(.title | contains(\"${ticket}\")) | .url" 2>>"$_gh_debug") || true
     fi
     [[ -n "$result" ]] && break
     [[ "$attempt" -lt 3 ]] && sleep 5
