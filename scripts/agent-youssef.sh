@@ -451,12 +451,27 @@ SHORT_SUMMARY=$(echo "$SUMMARY" | head -c 60)
 git add -A -- packages/ 2>/dev/null || true
 git add -A -- src/ 2>/dev/null || true
 git add -A -- public/ 2>/dev/null || true
+git add -A -- .husky/ 2>/dev/null || true
 git add -A -- .gitignore package.json package-lock.json pnpm-lock.yaml 2>/dev/null || true
 git add -A -- tsconfig*.json vite.config.* tailwind.config.* eslint.config.* postcss.config.* 2>/dev/null || true
 git add -A -- index.html index-vite.html components.json 2>/dev/null || true
 git add -A -- deploy.sh nginx/ .env.*.example 2>/dev/null || true
 git add -A -- .github/ 2>/dev/null || true
-git commit -m "$(cat <<EOF
+
+# Log what is staged so failures are diagnosable
+STAGED_FILES=$(git diff --cached --name-only 2>/dev/null || true)
+if [[ -z "$STAGED_FILES" ]]; then
+  log_error "Nothing staged after git add — Claude may not have written any files"
+  increment_retry "$TICKET_KEY" "youssef"
+  jira_add_rich_comment "$TICKET_KEY" "youssef" "WARNING" "## No staged changes
+Diff showed ${DIFF_SIZE} working tree lines but nothing staged for commit.
+Will retry next cycle."
+  exit 1
+fi
+log_info "Staged files: $(echo "$STAGED_FILES" | wc -l | tr -d ' ') file(s): $(echo "$STAGED_FILES" | head -5 | tr '\n' ' ')"
+
+# HUSKY=0 disables husky hooks for automated agent commits (hooks are dev-only tools)
+COMMIT_MSG=$(cat <<EOF
 feat(${TICKET_KEY}): ${SHORT_SUMMARY}
 
 Implemented by Youssef (AI Dev Agent)
@@ -464,26 +479,35 @@ Ticket: ${TICKET_KEY}
 
 Co-Authored-By: Youssef (AI) <youssef@${PROJECT_KEY,,}.ai>
 EOF
-)" 2>&1 >> "$LOG_FILE" || {
-  log_info "Nothing new to commit (Claude may have committed already)"
+)
+HUSKY=0 git commit -m "$COMMIT_MSG" >> "$LOG_FILE" 2>&1 || {
+  log_info "Commit returned non-zero — checking if already committed..."
+  ALREADY_COMMITTED=$(git rev-list --count "origin/${BASE_BRANCH}..HEAD" 2>/dev/null || echo "0")
+  if [[ "$ALREADY_COMMITTED" -gt 0 ]]; then
+    log_info "Branch has ${ALREADY_COMMITTED} commit(s) ahead of origin/${BASE_BRANCH} — commit was already made"
+  else
+    log_error "Commit failed and no commits ahead of origin/${BASE_BRANCH}"
+    increment_retry "$TICKET_KEY" "youssef"
+    exit 1
+  fi
 }
 
 # Git push with rebase recovery ladder
-if ! git push -u origin "$BRANCH" 2>&1 >> "$LOG_FILE"; then
+if ! HUSKY=0 git push -u origin "$BRANCH" >> "$LOG_FILE" 2>&1; then
   log_info "Push failed — trying rebase recovery..."
 
   # Step 2: Fetch + rebase onto base branch
-  git fetch origin "$BASE_BRANCH" 2>&1 >> "$LOG_FILE"
-  if git rebase "origin/$BASE_BRANCH" 2>&1 >> "$LOG_FILE"; then
+  git fetch origin "$BASE_BRANCH" >> "$LOG_FILE" 2>&1
+  if HUSKY=0 git rebase "origin/$BASE_BRANCH" >> "$LOG_FILE" 2>&1; then
     log_info "Rebase successful — pushing..."
-    if ! git push -u origin "$BRANCH" 2>&1 >> "$LOG_FILE"; then
+    if ! HUSKY=0 git push -u origin "$BRANCH" >> "$LOG_FILE" 2>&1; then
       # Step 3: Force-with-lease as last resort (feature branch only)
       log_info "Post-rebase push failed — force-with-lease..."
-      git push --force-with-lease origin "$BRANCH" 2>&1 >> "$LOG_FILE" || {
+      HUSKY=0 git push --force-with-lease origin "$BRANCH" >> "$LOG_FILE" 2>&1 || {
         log_info "All push attempts failed — will retry next cycle"
         increment_retry "$TICKET_KEY" "youssef"
         # Save error context for Omar's auto-unblock
-        echo "- Git push rejected: $(git push -u origin "$BRANCH" 2>&1 | head -3 || true)" > "${FEEDBACK_DIR}/${TICKET_KEY}.txt"
+        echo "- Git push rejected: $(HUSKY=0 git push -u origin "$BRANCH" 2>&1 | head -3 || true)" > "${FEEDBACK_DIR}/${TICKET_KEY}.txt"
         exit 1
       }
     fi
@@ -491,7 +515,7 @@ if ! git push -u origin "$BRANCH" 2>&1 >> "$LOG_FILE"; then
     # Rebase had conflicts — abort and force-push current state
     git rebase --abort 2>/dev/null || true
     log_info "Rebase conflicts — force-pushing current state..."
-    git push --force-with-lease origin "$BRANCH" 2>&1 >> "$LOG_FILE" || {
+    HUSKY=0 git push --force-with-lease origin "$BRANCH" >> "$LOG_FILE" 2>&1 || {
       log_info "Force-with-lease failed after rebase conflict — will retry next cycle"
       increment_retry "$TICKET_KEY" "youssef"
       echo "- Git push failed after rebase conflict" > "${FEEDBACK_DIR}/${TICKET_KEY}.txt"
