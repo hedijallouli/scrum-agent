@@ -39,13 +39,17 @@ ${SPRINT_TICKETS}"
 fi
 
 # ─── 1b. Rotating daily focus ─────────────────────────────────────────────────
-DOW=$(date +%u)  # 1=Mon ... 5=Fri
+# Project-specific focus topics via env vars (LAYLA_FOCUS_1..5).
+# Falls back to BISB/gaming defaults if not set.
+DOW=$(date +%u)  # 1=Mon ... 7=Sun
 case "$DOW" in
-  1) DAY_FOCUS="Competitors deep-dive (BGA, Monopoly GO, Tabletop Sim updates)" ;;
-  2) DAY_FOCUS="UX/UI trends (onboarding, mobile-first, accessibility)" ;;
-  3) DAY_FOCUS="Monetization models (freemium, cosmetics, battle passes, regional pricing)" ;;
-  4) DAY_FOCUS="Tunisian/MENA gaming market (local trends, Arabic localization, regional launches)" ;;
-  5) DAY_FOCUS="Tech & multiplayer (WebSocket patterns, matchmaking, cross-platform play)" ;;
+  1) DAY_FOCUS="${LAYLA_FOCUS_1:-Competitors deep-dive (BGA, Monopoly GO, Tabletop Sim updates)}" ;;
+  2) DAY_FOCUS="${LAYLA_FOCUS_2:-UX/UI trends (onboarding, mobile-first, accessibility)}" ;;
+  3) DAY_FOCUS="${LAYLA_FOCUS_3:-Monetization models (freemium, cosmetics, battle passes, regional pricing)}" ;;
+  4) DAY_FOCUS="${LAYLA_FOCUS_4:-Tunisian/MENA gaming market (local trends, Arabic localization, regional launches)}" ;;
+  5) DAY_FOCUS="${LAYLA_FOCUS_5:-Tech & multiplayer (WebSocket patterns, matchmaking, cross-platform play)}" ;;
+  6) DAY_FOCUS="${LAYLA_FOCUS_6:-Weekend: player community trends and social features}" ;;
+  7) DAY_FOCUS="${LAYLA_FOCUS_7:-Weekend: product roadmap review and backlog refinement}" ;;
   *) DAY_FOCUS="General market scan" ;;
 esac
 log_info "Today's focus: $DAY_FOCUS"
@@ -64,13 +68,11 @@ fi
 # ─── 2. Generate market intelligence report ──────────────────────────────────
 log_info "Invoking Claude (sonnet) for market intelligence..."
 
-REPORT_PROMPT="You are Layla, the Product Strategist for ${PROJECT_NAME} (${PROJECT_KEY}).
-Read your persona file (ai/product-marketing.md) for full project context.
-Today is $(date +%Y-%m-%d).
+# Persona file: project-specific override or default
+PERSONA_FILE="${LAYLA_PERSONA_FILE:-ai/product-marketing.md}"
 
-YOUR TASK — DAILY PRODUCT INTELLIGENCE REPORT:
-1. Use WebSearch to research:
-   a) Digital board game market trends (mobile + web platforms)
+# Research areas: project-specific override or default (BISB/gaming)
+RESEARCH_AREAS="${LAYLA_RESEARCH_AREAS:-a) Digital board game market trends (mobile + web platforms)
    b) Competitor updates (Board Game Arena new games, Tabletop Simulator community, Monopoly GO updates)
    c) Mobile board game monetization models (free-to-play, premium, ad-supported)
    d) MENA region gaming audience trends and Arabic/French game localization
@@ -78,14 +80,10 @@ YOUR TASK — DAILY PRODUCT INTELLIGENCE REPORT:
    f) Tunisian gaming market and local developer ecosystem
    g) Hybrid board/digital game innovations (companion apps, AR/NFC integration)
    h) Mobile-first board game UX patterns (touch gestures, offline play, quick sessions)
-   i) Multiplayer matchmaking trends (skill-based, casual, async turn-based)
+   i) Multiplayer matchmaking trends (skill-based, casual, async turn-based)}"
 
-2. Produce a concise daily report:
-
-## Daily Focus: ${DAY_FOCUS}
-[Deep dive into today's rotating topic — see focus schedule below]
-
-## Digital Board Game Trends
+# Report sections: project-specific override or default
+REPORT_SECTIONS="${LAYLA_REPORT_SECTIONS:-## Digital Board Game Trends
 [New launches, market shifts, or nothing notable]
 
 ## Competitor Watch
@@ -95,7 +93,22 @@ YOUR TASK — DAILY PRODUCT INTELLIGENCE REPORT:
 [UX patterns, onboarding best practices, mobile optimization trends]
 
 ## Monetization & Distribution
-[App store trends, pricing models, Tunisian market considerations]
+[App store trends, pricing models, Tunisian market considerations]}"
+
+REPORT_PROMPT="You are Layla, the Product Strategist for ${PROJECT_NAME} (${PROJECT_KEY}).
+Read your persona file (${PERSONA_FILE}) for full project context.
+Today is $(date +%Y-%m-%d).
+
+YOUR TASK — DAILY PRODUCT INTELLIGENCE REPORT:
+1. Use WebSearch to research:
+   ${RESEARCH_AREAS}
+
+2. Produce a concise daily report:
+
+## Daily Focus: ${DAY_FOCUS}
+[Deep dive into today's rotating topic]
+
+${REPORT_SECTIONS}
 
 ## Recommendations for Sprint
 [Any features the team should prioritize or de-prioritize based on today's findings]
