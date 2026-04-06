@@ -71,19 +71,28 @@ log_info "Invoking Claude (sonnet) for market intelligence..."
 # Persona file: project-specific override or default
 PERSONA_FILE="${LAYLA_PERSONA_FILE:-ai/product-marketing.md}"
 
-# Research areas: project-specific override or default (BISB/gaming)
-RESEARCH_AREAS="${LAYLA_RESEARCH_AREAS:-a) Digital board game market trends (mobile + web platforms)
+# Research areas: load from file if present, else env var, else BISB/gaming default
+RESEARCH_AREAS_FILE="${PROJECT_DIR}/ai/layla-daily-research.md"
+if [[ -f "$RESEARCH_AREAS_FILE" ]]; then
+  RESEARCH_AREAS=$(cat "$RESEARCH_AREAS_FILE")
+else
+  RESEARCH_AREAS="${LAYLA_RESEARCH_AREAS:-a) Digital board game market trends (mobile + web platforms)
    b) Competitor updates (Board Game Arena new games, Tabletop Simulator community, Monopoly GO updates)
    c) Mobile board game monetization models (free-to-play, premium, ad-supported)
    d) MENA region gaming audience trends and Arabic/French game localization
    e) Board game digitization best practices and player engagement patterns
    f) Tunisian gaming market and local developer ecosystem
-   g) Hybrid board/digital game innovations (companion apps, AR/NFC integration)
+   g) Hybrid board/digital game innovations (companion apps, AR/NFC interaction)
    h) Mobile-first board game UX patterns (touch gestures, offline play, quick sessions)
    i) Multiplayer matchmaking trends (skill-based, casual, async turn-based)}"
+fi
 
-# Report sections: project-specific override or default
-REPORT_SECTIONS="${LAYLA_REPORT_SECTIONS:-## Digital Board Game Trends
+# Report sections: load from file if present, else BISB/gaming default
+REPORT_SECTIONS_FILE="${PROJECT_DIR}/ai/layla-daily-sections.md"
+if [[ -f "$REPORT_SECTIONS_FILE" ]]; then
+  REPORT_SECTIONS=$(cat "$REPORT_SECTIONS_FILE")
+else
+  REPORT_SECTIONS="## Digital Board Game Trends
 [New launches, market shifts, or nothing notable]
 
 ## Competitor Watch
@@ -93,7 +102,8 @@ REPORT_SECTIONS="${LAYLA_REPORT_SECTIONS:-## Digital Board Game Trends
 [UX patterns, onboarding best practices, mobile optimization trends]
 
 ## Monetization & Distribution
-[App store trends, pricing models, Tunisian market considerations]}"
+[App store trends, pricing models, Tunisian market considerations]"
+fi
 
 REPORT_PROMPT="You are Layla, the Product Strategist for ${PROJECT_NAME} (${PROJECT_KEY}).
 Read your persona file (${PERSONA_FILE}) for full project context.
