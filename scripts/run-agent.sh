@@ -76,7 +76,8 @@ if ! acquire_lock; then
   log_info "Agent ${AGENT} already running (lock held), skipping"
   exit 0
 fi
-trap 'release_lock' EXIT
+# Kill heartbeat before releasing lock — prevents race where heartbeat recreates lock after release
+trap 'kill "${_HEARTBEAT_PID:-}" 2>/dev/null; release_lock' EXIT
 
 # ─── Ensure clean base branch before agent starts ──────────────────────────
 cd "$PROJECT_DIR"
