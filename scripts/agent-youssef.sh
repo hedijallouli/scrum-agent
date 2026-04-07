@@ -253,12 +253,26 @@ STEPS:
 
 When done, output a brief summary of what you implemented."
 
+CLAUDE_OUTPUT=""
 CLAUDE_OUTPUT=$(cd "$PROJECT_DIR" && claude -p "$CLAUDE_PROMPT" \
   --allowedTools "Read Write Edit Glob Grep Bash(npm:*) Bash(git add:*) Bash(git rm:*) Bash(git status:*) Bash(git diff:*)" \
-  --model $MODEL --max-turns 50 2>/dev/null) || true
+  --model $MODEL --max-turns 50 2>/dev/null) || {
+  _claude_exit=$?
+  log_error "Claude invocation failed (exit ${_claude_exit})"
+  increment_retry "$TICKET_KEY" "youssef"
+  exit 1
+}
 
 log_info "Claude output:"
 echo "$CLAUDE_OUTPUT" >> "$LOG_FILE"
+
+# Validate output before treating the run as success.
+# Catches: empty output, rate-limit messages, "I cannot proceed" semantic failures.
+if ! validate_claude_output "$CLAUDE_OUTPUT" 30 "youssef/${TICKET_KEY}"; then
+  increment_retry "$TICKET_KEY" "youssef"
+  jira_add_rich_comment "$TICKET_KEY" "youssef" "WARNING" "Claude did not produce valid output (empty or blocking condition). Will retry next cycle."
+  exit 1
+fi
 
 # ─── 6. Run quality checks ───────────────────────────────────────────────────
 log_info "Running quality checks..."

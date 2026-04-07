@@ -3,9 +3,12 @@
 # agent-common.sh — Shared utilities for scrum-agent pipeline
 # =============================================================================
 set -euo pipefail
+# inherit_errexit: make $() subshells also exit on error (bash 4.4+)
+# Without this, local var=$(failing_cmd) swallows the exit code silently.
+shopt -s inherit_errexit 2>/dev/null || true
 
 # Ensure tools are in PATH (claude, gh, npm may be in user-local dirs)
-export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+export PATH="${HOME:-/root}/.local/bin:/usr/local/bin:$PATH"
 
 # Load environment — detect project from parent directory or env override
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -2228,6 +2231,94 @@ parse_verdict() {
     FAIL*|EXCEED*|REJECT*|BLOCK*) echo "FAIL" ;;
     *) echo "$verdict" ;;
   esac
+}
+
+# ─── Claude Output Validation ───────────────────────────────────────────────
+# Call after every `claude -p` invocation before treating the run as success.
+# Catches the silent failure loop: Claude exits 0 but produced nothing useful.
+#
+# Usage: validate_claude_output "$CLAUDE_OUTPUT" [min_length] [context_label]
+# Returns: 0 = valid, non-zero = treat as failure (increment_retry + exit)
+validate_claude_output() {
+  local output="$1"
+  local min_length="${2:-30}"
+  local context="${3:-agent}"
+
+  if [[ -z "$output" ]]; then
+    log_error "[${context}] Claude returned empty output — likely auth/env failure"
+    return 1
+  fi
+
+  if (( ${#output} < min_length )); then
+    log_error "[${context}] Claude output too short (${#output} chars < ${min_length}): ${output}"
+    return 2
+  fi
+
+  # Semantic failure: Claude expressed inability but exited 0.
+  # These patterns mean the agent accomplished nothing — retrying is pointless
+  # unless the underlying condition changes (env fix, new context, etc.)
+  if echo "$output" | grep -qiE \
+    "you've hit your limit|hit your (daily )?limit|resets [0-9]|unable to proceed|I('m| am) unable|I can't proceed|cannot access|don't have access|permission (required|denied)|blocked by|need (your )?approval|(max|maximum).turns.reached|reached the maximum|I cannot (write|read|access|create|edit|modify|help with this)"; then
+    log_error "[${context}] Claude expressed a blocking condition — semantic failure (exit 0 but no work done)"
+    log_error "[${context}] First 200 chars: ${output:0:200}"
+    return 3
+  fi
+
+  return 0
+}
+
+# ─── Preflight Check ─────────────────────────────────────────────────────────
+# Run at the top of agent-cron.sh dispatch loop to fail fast before burning
+# any Claude tokens. Checks: PATH, auth, Plane reachability.
+# Exits 99 (distinct from agent failure codes) if critical checks fail.
+preflight_check() {
+  local errors=0
+  local warnings=0
+
+  # 1. claude CLI must be in PATH
+  if ! command -v claude &>/dev/null; then
+    log_error "PREFLIGHT: 'claude' not found in PATH=${PATH}"
+    (( errors++ )) || true
+  fi
+
+  # 2. gh CLI must be in PATH
+  if ! command -v gh &>/dev/null; then
+    log_error "PREFLIGHT: 'gh' not found in PATH=${PATH}"
+    (( errors++ )) || true
+  else
+    # 3. gh must be authenticated (uses GH_TOKEN or ~/.config/gh/hosts.yml)
+    if ! gh auth status &>/dev/null 2>&1; then
+      log_error "PREFLIGHT: gh not authenticated (HOME=${HOME:-unset}, GH_TOKEN=${GH_TOKEN:+set})"
+      (( errors++ )) || true
+    fi
+  fi
+
+  # 4. Plane API must be reachable (warn only — agents degrade gracefully)
+  if [[ -n "${PLANE_URL:-}" ]]; then
+    if ! curl -sf --max-time 5 "${PLANE_URL}/api/" &>/dev/null 2>&1; then
+      log_info "PREFLIGHT WARNING: Plane API unreachable at ${PLANE_URL} — agents will use cached state"
+      (( warnings++ )) || true
+    fi
+  fi
+
+  # 5. /tmp must have at least 50MB free (Claude Code writes scratch files there)
+  local avail_kb
+  avail_kb=$(df /tmp 2>/dev/null | awk 'NR==2{print $4}' || echo "999999")
+  if (( avail_kb < 51200 )); then
+    log_error "PREFLIGHT: /tmp has only ${avail_kb}KB free — Claude bash tool returns empty output silently when /tmp is full"
+    (( errors++ )) || true
+  fi
+
+  if (( errors > 0 )); then
+    log_error "PREFLIGHT: ${errors} critical check(s) failed — skipping dispatch cycle to avoid wasting tokens"
+    exit 99
+  fi
+
+  if (( warnings > 0 )); then
+    log_info "PREFLIGHT: passed (${warnings} warning(s)) — proceeding with dispatch"
+  else
+    log_info "PREFLIGHT: all checks passed"
+  fi
 }
 
 # ─── Initialization ──────────────────────────────────────────────────────────

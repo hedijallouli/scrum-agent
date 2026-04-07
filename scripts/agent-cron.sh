@@ -54,6 +54,11 @@ elif [[ "$HOUR_UTC" -lt 8 || "$HOUR_UTC" -ge 20 ]]; then
   exit 0
 fi
 
+# ─── Preflight: validate env before spending any tokens ─────────────────────
+# Fails fast (exit 99) if claude/gh auth is broken. Avoids retry loops where
+# every 15-min cycle burns tokens on a doomed run.
+preflight_check
+
 # Safety: ensure main repo stays on base branch
 cd "$PROJECT_DIR" && git checkout "${BASE_BRANCH}" -q 2>/dev/null || git checkout -B "${BASE_BRANCH}" "origin/${BASE_BRANCH}" -q 2>/dev/null || true
 

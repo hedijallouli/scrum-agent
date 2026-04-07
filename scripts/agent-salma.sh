@@ -597,9 +597,15 @@ needs. Incorporate their insights into your spec. Their comments are labeled as
 
 Output ONLY the spec text, no preamble. Start with ## Summary"
 
+CLAUDE_OUTPUT=""
 CLAUDE_OUTPUT=$(cd "$PROJECT_DIR" && claude -p "$CLAUDE_PROMPT" \
   --allowedTools "Read Glob Grep WebSearch WebFetch" \
-  --model $MODEL --max-turns 25 2>/dev/null) || true
+  --model $MODEL --max-turns 25 2>/dev/null) || {
+  _claude_exit=$?
+  log_error "Claude invocation failed (exit ${_claude_exit})"
+  increment_retry "$TICKET_KEY" "salma"
+  exit 1
+}
 
 log_info "Claude PM output:"
 echo "$CLAUDE_OUTPUT" >> "$LOG_FILE"
@@ -607,9 +613,9 @@ echo "$CLAUDE_OUTPUT" >> "$LOG_FILE"
 # ─── 6. Validate output ──────────────────────────────────────────────────────
 log_info "Validating spec..."
 
-if [[ -z "$CLAUDE_OUTPUT" ]]; then
-  log_error "Claude returned empty output"
+if ! validate_claude_output "$CLAUDE_OUTPUT" 50 "salma/${TICKET_KEY}"; then
   increment_retry "$TICKET_KEY" "salma"
+  jira_add_rich_comment "$TICKET_KEY" "salma" "WARNING" "Claude did not produce valid spec output. Will retry next cycle."
   exit 1
 fi
 

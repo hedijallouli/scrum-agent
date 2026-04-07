@@ -243,17 +243,24 @@ CRITICAL: You MUST output exactly one VERDICT line."
   PROMPT_FILE=$(mktemp /tmp/rami-prompt-XXXXXX.txt)
   echo "$CLAUDE_PROMPT" > "$PROMPT_FILE"
 
+  CLAUDE_OUTPUT=""
   CLAUDE_OUTPUT=$(cd "$PROJECT_DIR" && claude -p - \
     --allowedTools "Read Glob Grep" \
     --model "$MODEL" --max-turns 15 \
-    < "$PROMPT_FILE" 2>/dev/null) || true
+    < "$PROMPT_FILE" 2>/dev/null) || {
+    _claude_exit=$?
+    rm -f "$PROMPT_FILE"
+    log_error "Claude invocation failed (exit ${_claude_exit})"
+    increment_retry "$TICKET_KEY" "rami"
+    exit 1
+  }
   rm -f "$PROMPT_FILE"
 
   log_info "Claude output:"
   echo "$CLAUDE_OUTPUT" >> "$LOG_FILE"
 
   # ─── Parse verdict ──────────────────────────────────────────────────────
-  if [[ -z "$CLAUDE_OUTPUT" ]]; then
+  if ! validate_claude_output "$CLAUDE_OUTPUT" 30 "rami/${TICKET_KEY}"; then
     log_error "Claude returned empty output"
     increment_retry "$TICKET_KEY" "rami"
     jira_add_rich_comment "$TICKET_KEY" "rami" "WARNING" "## Architecture Review — Empty Response
