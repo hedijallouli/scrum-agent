@@ -640,9 +640,32 @@ requests.patch(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/{issue_id}/
 
     local body
     body=$(python3 -c "
-import json, sys
+import json, sys, re
+
 msg = sys.argv[1]
-print(json.dumps({'comment_stripped': msg, 'comment_html': '<p>' + msg + '</p>'}))" "$message")
+
+# Strip emoji / non-BMP characters that Plane renders as weird chars
+msg_clean = ''.join(c for c in msg if ord(c) < 0x10000 and not (0x1F300 <= ord(c) <= 0x1FAFF))
+
+# Convert markdown to HTML
+try:
+    import markdown as md_lib
+    html = md_lib.markdown(msg_clean, extensions=['nl2br', 'tables'])
+except ImportError:
+    # Fallback: manual conversion
+    html = msg_clean
+    html = re.sub(r'^### (.+?)$', r'<h3>\1</h3>', html, flags=re.MULTILINE)
+    html = re.sub(r'^## (.+?)$', r'<h2>\1</h2>', html, flags=re.MULTILINE)
+    html = re.sub(r'^# (.+?)$', r'<h1>\1</h1>', html, flags=re.MULTILINE)
+    html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', html)
+    html = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<em>\1</em>', html)
+    html = re.sub(r'\`(.+?)\`', r'<code>\1</code>', html)
+    html = re.sub(r'^[-*] (.+?)$', r'<li>\1</li>', html, flags=re.MULTILINE)
+    html = re.sub(r'(<li>.*</li>)', r'<ul>\1</ul>', html, flags=re.DOTALL)
+    paras = [p.strip() for p in re.split(r'\n{2,}', html) if p.strip()]
+    html = ''.join(p if p.startswith('<') else f'<p>{p}</p>' for p in paras)
+
+print(json.dumps({'comment_stripped': msg_clean, 'comment_html': html}))" "$message")
 
     plane_api POST "/api/v1/workspaces/${PLANE_WS}/projects/${PLANE_PID}/issues/${issue_id}/comments/" \
       "$body" >/dev/null 2>&1
