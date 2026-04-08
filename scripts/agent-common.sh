@@ -2294,8 +2294,10 @@ preflight_check() {
   fi
 
   # 4. Plane API must be reachable (warn only — agents degrade gracefully)
-  if [[ -n "${PLANE_URL:-}" ]]; then
-    if ! curl -sf --max-time 5 "${PLANE_URL}/api/" &>/dev/null 2>&1; then
+  # Use /api/v1/workspaces/ with auth — the root / returns 200 for UI but API
+  # endpoints may still fail. This tests the actual API path agents use.
+  if [[ -n "${PLANE_URL:-}" && -n "${PLANE_API_KEY:-}" ]]; then
+    if ! curl -sf --max-time 5 -H "X-Api-Key: ${PLANE_API_KEY}" "${PLANE_URL}/api/v1/workspaces/" &>/dev/null 2>&1; then
       log_info "PREFLIGHT WARNING: Plane API unreachable at ${PLANE_URL} — agents will use cached state"
       (( warnings++ )) || true
     fi
