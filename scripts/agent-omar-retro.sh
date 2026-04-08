@@ -5,7 +5,7 @@ set -euo pipefail
 # Writes ops/monitoring perspective on retro-action tickets
 # Pattern: Haiku, 1 turn, no tools → comment → hand to Salma
 
-AGENT_NAME="rami-retro"
+AGENT_NAME="omar-retro"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/agent-common.sh"
 
@@ -24,7 +24,7 @@ log_info "Ticket: $SUMMARY"
 # ─── Generate ops perspective ────────────────────────────────────────────────
 OPS_ROLE=$(cat "${SCRIPT_DIR}/../ai/ops.md" 2>/dev/null || echo "You are Omar, the Ops & Monitoring specialist.")
 
-CLAUDE_OUTPUT=$(claude -p --model haiku --max-turns 1  "
+CLAUDE_PROMPT="
 ${OPS_ROLE}
 
 You are writing an OPS/MONITORING PERSPECTIVE comment for a retro-action ticket.
@@ -45,17 +45,22 @@ Write a concise ops perspective (max 300 words) covering:
 4. **Detection Criteria**: How would we detect regressions related to this issue?
 5. **Ops Acceptance Criteria**: 2-3 bullet points for ops validation
 
-Format as a clean comment. Start with '🔧 **Ops Perspective**' header.
-Do NOT include any VERDICT.
-")
+Format as a clean comment. Start with '## Ops Perspective' header.
+Do NOT include any VERDICT. Do not use tools.
+"
 
-if [[ -z "$CLAUDE_OUTPUT" ]]; then
-  log_error "Claude returned empty output"
+CLAUDE_OUTPUT=$(claude -p "$CLAUDE_PROMPT" --model haiku --max-turns 3 2>/dev/null) || {
+  log_error "Claude invocation failed"
+  exit 1
+}
+
+if ! validate_claude_output "$CLAUDE_OUTPUT" 30 "omar-retro/${TICKET_KEY}"; then
+  log_error "Claude did not produce valid output"
   exit 1
 fi
 
 # ─── Post comment and route to Salma ─────────────────────────────────────────
-jira_add_rich_comment "$TICKET_KEY" "$CLAUDE_OUTPUT" "omar"
+jira_add_comment "$TICKET_KEY" "$CLAUDE_OUTPUT"
 log_info "Posted ops perspective comment"
 
 # Route to Salma for spec writing
