@@ -131,8 +131,17 @@ _dbg="/tmp/${PROJECT_PREFIX}-nadia-cron-env-${TICKET_KEY}-$(date +%s).txt"
 PR_URL=$(find_pr_for_ticket "$TICKET_KEY")
 if [[ -z "$PR_URL" ]]; then
   log_error "No open PR found for ${TICKET_KEY}"
-  jira_add_rich_comment "$TICKET_KEY" "nadia" "BLOCKED" "No open PR found for this ticket. Cannot review."
-  exit 1
+  # No PR = ticket not yet implemented. Reroute to Youssef (Ready) instead of looping.
+  if declare -f plane_set_state &>/dev/null && declare -f plane_assign_ticket &>/dev/null; then
+    log_info "Rerouting ${TICKET_KEY} to Youssef (Ready) — no PR exists yet"
+    plane_set_state "$TICKET_KEY" "Ready"
+    plane_assign_ticket "$TICKET_KEY" "youssef"
+    jira_add_rich_comment "$TICKET_KEY" "nadia" "INFO" "Aucun PR trouve. Retourne a Youssef (Ready) pour implementation."
+    slack_notify "nadia" "$(mm_ticket_link "${TICKET_KEY}") — aucun PR. Ticket redirige vers Youssef." "pipeline" "warning" 2>/dev/null || true
+  else
+    jira_add_rich_comment "$TICKET_KEY" "nadia" "BLOCKED" "No open PR found for this ticket. Cannot review."
+  fi
+  exit 0
 fi
 
 log_info "Found PR: ${PR_URL}"
