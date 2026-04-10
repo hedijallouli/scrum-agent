@@ -663,6 +663,79 @@ done
 log_info "All agents complete. Failures: $FAILURES/${#ALL_PIDS[@]}"
 
 # ═══════════════════════════════════════════════════════════════════════════
+# PHASE 4b: Sprint Backlog Promoter
+# Any ticket that is in Backlog state AND belongs to the active sprint cycle
+# gets promoted to Todo so Salma can pick it up. Prevents sprint tickets
+# from silently stalling because they were never moved out of Backlog.
+# ═══════════════════════════════════════════════════════════════════════════
+promote_sprint_backlog_tickets() {
+  [[ "${TRACKER_BACKEND:-jira}" != "plane" ]] && return
+  local _tmp
+  _tmp=$(mktemp /tmp/${PROJECT_PREFIX}-promote-XXXXXX.py)
+  cat > "$_tmp" << 'PROMOTE_PYEOF'
+import os, sys, requests
+
+base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
+ws   = os.environ.get('PLANE_WORKSPACE_SLUG','')
+pid  = os.environ.get('PLANE_PROJECT_ID','')
+key  = os.environ.get('PLANE_API_KEY','')
+h    = {'X-API-Key': key, 'Content-Type': 'application/json'}
+
+# State IDs
+BACKLOG_STATE = os.environ.get('STATE_BACKLOG','')
+TODO_STATE    = os.environ.get('STATE_TODO','')
+if not BACKLOG_STATE or not TODO_STATE:
+    sys.exit(0)
+
+# Find active cycle
+cr = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/?per_page=20', headers=h, timeout=10)
+cycles = cr.json() if isinstance(cr.json(), list) else cr.json().get('results', [])
+if not cycles:
+    sys.exit(0)
+# Pick the most recent cycle (Plane does not reliably set status='current')
+cycle = sorted(cycles, key=lambda c: c.get('start_date') or '', reverse=True)[0]
+cid = cycle['id']
+
+# Get sprint issue IDs
+ci = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/{cid}/cycle-issues/?per_page=200', headers=h, timeout=15)
+ci = ci.json() if isinstance(ci.json(), list) else ci.json().get('results', [])
+sprint_ids = {i['id'] for i in ci}
+if not sprint_ids:
+    sys.exit(0)
+
+# Get all issues
+issues = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=200', headers=h, timeout=15).json().get('results', [])
+
+promoted = []
+for issue in issues:
+    if issue['id'] not in sprint_ids:
+        continue
+    if issue.get('state') != BACKLOG_STATE:
+        continue
+    seq = issue.get('sequence_id', '?')
+    iid = issue['id']
+    r = requests.patch(
+        f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/{iid}/',
+        headers=h, json={'state': TODO_STATE}, timeout=10)
+    if r.status_code == 200:
+        promoted.append(f'{os.environ.get("JIRA_PROJECT","CDO")}-{seq}')
+
+if promoted:
+    print(' '.join(promoted))
+PROMOTE_PYEOF
+
+  local promoted
+  promoted=$(python3 "$_tmp" 2>/dev/null || echo "")
+  rm -f "$_tmp"
+
+  if [[ -n "$promoted" ]]; then
+    log_info "Sprint backlog promoter: moved to Todo → ${promoted}"
+  fi
+}
+
+promote_sprint_backlog_tickets
+
+# ═══════════════════════════════════════════════════════════════════════════
 # PHASE 5: Sprint Ceremony (if sprint is complete)
 # ═══════════════════════════════════════════════════════════════════════════
 run_sprint_ceremony_if_needed() {
