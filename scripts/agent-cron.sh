@@ -747,63 +747,55 @@ run_sprint_ceremony_if_needed() {
     return
   fi
 
-  # Count cycle tickets still not done (cycle-based, not all project tickets)
+  # Count cycle tickets still not done — direct cross-reference (cycle-issues × full issues)
+  # This avoids the fragile plane_get_cycle_stats JSON parse which returns 0/0 when stderr
+  # output contaminates the JSON stream.
   local REMAINING=99
-  if declare -f plane_get_current_cycle_id &>/dev/null && declare -f plane_get_cycle_stats &>/dev/null; then
-    local _cycle_id
+  local _cycle_id
+  _cycle_id=$(cat "/tmp/${PROJECT_PREFIX}-last-cycle-id" 2>/dev/null || echo "")
+  if [[ -z "$_cycle_id" ]] && declare -f plane_get_current_cycle_id &>/dev/null; then
     _cycle_id=$(plane_get_current_cycle_id 2>/dev/null || echo "")
-    # Fallback: use last-cycle-id file if function returned empty
-    if [[ -z "$_cycle_id" ]]; then
-      _cycle_id=$(cat "/tmp/${PROJECT_PREFIX}-last-cycle-id" 2>/dev/null || echo "")
-      [[ -n "$_cycle_id" ]] && log_info "cycle_id from last-cycle-id file: ${_cycle_id:0:8}"
-    fi
-    if [[ -n "$_cycle_id" ]]; then
-      local _stats
-      _stats=$(plane_get_cycle_stats "$_cycle_id" 2>/dev/null || echo "")
-      if [[ -n "$_stats" ]]; then
-        local _done _total
-        _done=$(echo "$_stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('done',0))" 2>/dev/null || echo 0)
-        _total=$(echo "$_stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total',0))" 2>/dev/null || echo 0)
-        _done=$(echo "$_done" | tr -dc '0-9'); _done=${_done:-0}
-        _total=$(echo "$_total" | tr -dc '0-9'); _total=${_total:-0}
-        if [[ "$_total" -gt 0 ]]; then
-          REMAINING=$(( _total - _done ))
-        else
-          REMAINING=99  # No tickets in cycle → not done
-        fi
-        log_info "Sprint progress: ${_done}/${_total} done (cycle ${_cycle_id:0:8})"
-      fi
-    else
-      log_info "No active Plane cycle — sprint completion check skipped"
-    fi
-  else
-    # Fallback: count all project tickets (legacy)
-    local _tmp_plane
-    _tmp_plane=$(mktemp /tmp/${PROJECT_PREFIX}-plane-check-XXXXXX.py)
-    cat > "$_tmp_plane" << 'PLANE_PYEOF'
-import os, sys, requests
-base = os.environ.get('PLANE_BASE_URL', '').rstrip('/')
-ws   = os.environ.get('PLANE_WORKSPACE_SLUG', '')
-pid  = os.environ.get('PLANE_PROJECT_ID', '')
-key  = os.environ.get('PLANE_API_KEY', '')
-h    = {'X-API-Key': key, 'Content-Type': 'application/json'}
+  fi
+
+  if [[ -n "$_cycle_id" ]]; then
+    local _tmp_check
+    _tmp_check=$(mktemp /tmp/${PROJECT_PREFIX}-ceremony-check-XXXXXX.py)
+    cat > "$_tmp_check" << 'CEREMONY_PYEOF'
+import os, sys, json, requests
+cycle_id = sys.argv[1]
+base = os.environ.get('PLANE_BASE_URL','').rstrip('/')
+ws   = os.environ.get('PLANE_WORKSPACE_SLUG','')
+pid  = os.environ.get('PLANE_PROJECT_ID','')
+key  = os.environ.get('PLANE_API_KEY','')
+h    = {'X-API-Key': key}
 try:
-    r  = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/states/', headers=h, timeout=15)
-    states = r.json()
-    if isinstance(states, dict): states = states.get('results', [])
-    active_ids = {s['id'] for s in states if s.get('group') in ('started', 'unstarted', 'backlog')}
-    r2 = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=250', headers=h, timeout=15)
-    issues = r2.json()
-    if isinstance(issues, dict): issues = issues.get('results', [])
-    remaining = sum(1 for i in issues if i.get('state') in active_ids)
-    print(remaining)
-except Exception:
-    print(99)
-PLANE_PYEOF
-    REMAINING=$(python3 "$_tmp_plane" 2>/dev/null || echo 99)
-    rm -f "$_tmp_plane"
-    REMAINING=$(echo "$REMAINING" | tr -dc '0-9')
-    REMAINING=${REMAINING:-99}
+    sr = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/states/', headers=h, timeout=15).json()
+    states = sr if isinstance(sr, list) else sr.get('results', [])
+    done_ids = {s['id'] for s in states if s.get('group') in ('completed', 'cancelled')}
+    cr = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/cycles/{cycle_id}/cycle-issues/?per_page=200', headers=h, timeout=15).json()
+    ci = cr if isinstance(cr, list) else cr.get('results', [])
+    sprint_ids = {i['id'] for i in ci}
+    ir = requests.get(f'{base}/api/v1/workspaces/{ws}/projects/{pid}/issues/?per_page=200', headers=h, timeout=15).json().get('results', [])
+    sprint = [i for i in ir if i['id'] in sprint_ids]
+    done  = sum(1 for i in sprint if i['state'] in done_ids)
+    total = len(sprint)
+    remaining = total - done
+    print(json.dumps({'done': done, 'total': total, 'remaining': remaining}))
+except Exception as e:
+    print(json.dumps({'done': 0, 'total': 0, 'remaining': 99}), file=sys.stderr)
+    print(json.dumps({'done': 0, 'total': 0, 'remaining': 99}))
+CEREMONY_PYEOF
+    local _result
+    _result=$(python3 "$_tmp_check" "$_cycle_id" 2>/dev/null || echo '{"remaining":99}')
+    rm -f "$_tmp_check"
+    local _done _total
+    _done=$(echo "$_result"  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('done',0))"      2>/dev/null || echo 0)
+    _total=$(echo "$_result" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('total',0))"     2>/dev/null || echo 0)
+    REMAINING=$(echo "$_result" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('remaining',99))" 2>/dev/null || echo 99)
+    REMAINING=$(echo "$REMAINING" | tr -dc '0-9'); REMAINING=${REMAINING:-99}
+    log_info "Sprint progress: ${_done}/${_total} done (cycle ${_cycle_id:0:8})"
+  else
+    log_info "No active Plane cycle — sprint completion check skipped"
   fi
 
   if [[ "$REMAINING" -gt 0 ]]; then
