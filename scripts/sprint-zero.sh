@@ -346,7 +346,7 @@ PROMPT_EOF
 # =============================================================================
 CONTEXT_CONTENT=$(read_file "$CONTEXT_FILE")
 
-run_phase 1 "Layla" "Product Strategist" "claude-opus-4-6" "product-marketing.md" "ai/product.md" \
+run_phase 1 "Layla" "Product Strategist" "claude-opus-4-8" "product-marketing.md" "ai/product.md" \
 "## Your Input
 
 ### Project Context (docs/project-context.md)
@@ -374,7 +374,7 @@ Be SPECIFIC to this project. Use real names, real numbers, real competitor names
 # =============================================================================
 PRODUCT_CONTENT=$(read_file "${PROJECT_DIR}/ai/product.md")
 
-run_phase 2 "Salma" "Product Manager" "claude-opus-4-6" "pm.md" "ai/pm.md" \
+run_phase 2 "Salma" "Product Manager" "claude-opus-4-8" "pm.md" "ai/pm.md" \
 "## Your Input
 
 ### Layla's Product Analysis (ai/product.md)
@@ -426,7 +426,7 @@ PM_CONTENT=$(read_file "${PROJECT_DIR}/ai/pm.md")
 BRIEF_CONTENT=$(read_file "${PROJECT_DIR}/docs/project-brief.md")
 CODEBASE_SUMMARY=$(collect_codebase_summary)
 
-run_phase 3 "Rami" "Technical Architect" "claude-opus-4-6" "architect.md" "ai/architect.md" \
+run_phase 3 "Rami" "Technical Architect" "claude-opus-4-8" "architect.md" "ai/architect.md" \
 "## Your Input
 
 ### Project Brief (docs/project-brief.md)
